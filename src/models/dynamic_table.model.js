@@ -46,6 +46,9 @@ const DynamicTableSchema = new Schema(
 
     // Indicates if the table supports sorting
     sortable: { type: Boolean, default: true },
+
+    // User who created the dynamic table
+    created_by: { type: Schema.Types.ObjectId, ref: 'user', required: true },
   },
   {
     // Enable timestamps for createdAt and updatedAt

@@ -1,0 +1,39 @@
+{
+  "version": "2025-11-08",
+  "entities": [
+    {
+      "name": "students",
+      "title": "Students",
+      "description": "Core student profile records",
+      "primary_key": "_id",
+      "fields": [
+        { "name": "_id", "type": "objectId" },
+        { "name": "school", "type": "objectId", "ref": "school" },
+        { "name": "first_name", "type": "string" },
+        { "name": "last_name", "type": "string" },
+        { "name": "email", "type": "string" },
+        { "name": "professional_email", "type": "string" },
+        { "name": "tele_phone", "type": "string" },
+        { "name": "sex", "type": "string", "enum": ["M", "F"] },
+        { "name": "civility", "type": "string", "enum": ["MR", "MRS"] },
+        { "name": "date_of_birth", "type": "date" },
+        { "name": "status", "type": "string", "enum": ["active", "pending", "deleted"] },
+        { "name": "student_title_status", "type": "string", "enum": ["current_active","completed","suspended","deactivated","retaking","admission","admission_need_validation","admission_ask_for_revision"] },
+        { "name": "admission_status", "type": "string", "enum": ["not_received","received_inprogress","received_not_completed","received_completed"] },
+        { "name": "identity_verification_status", "type": "string", "enum": ["not_sent","sent_to_student","details_confirmed","due_date_passed"] },
+        { "name": "place_of_birth", "type": "string" },
+        { "name": "nationality", "type": "string" },
+        { "name": "current_class", "type": "objectId", "ref": "class" },
+        { "name": "rncp_title", "type": "objectId", "ref": "rncp_title" },
+        { "name": "user_id", "type": "objectId", "ref": "user" },
+        { "name": "createdAt", "type": "date" },
+        { "name": "updatedAt", "type": "date" }
+      ],
+      "safe_preview_fields": ["first_name","last_name","email","status","student_title_status"]
+    }
+  ],
+  "constraints": {
+    "max_columns_per_table": 30,
+    "max_filters_per_request": 10
+  }
+}
