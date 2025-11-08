@@ -72,6 +72,9 @@ const DynamicTableSchema = new Schema(
 
     // User who created the dynamic table
     created_by: { type: Schema.Types.ObjectId, ref: 'user', required: true },
+
+    // Reference to the associated session chat
+    session_chat_id: { type: Schema.Types.ObjectId, ref: 'session_chat' },
   },
   {
     // Enable timestamps for createdAt and updatedAt
