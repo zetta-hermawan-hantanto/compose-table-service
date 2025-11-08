@@ -5,6 +5,9 @@ const cors = require('cors');
 // *************** IMPORT MODULE ***************
 const bilipRoutes = require('./routes/bilip.routes');
 
+// *************** IMPORT MIDDLEWARE ***************
+const { AuthMiddleware } = require('./middleware/auth.middleware');
+
 // *************** Initialize Express application
 const app = express();
 
@@ -24,6 +27,9 @@ app.get('/health', (req, res) => {
   
   return res.status(200).json(healthData);
 });
+
+// // *************** Add authentication middleware
+// app.use(AuthMiddleware);
 
 // *************** Mount bilip routes under /api prefix
 app.use('/api', bilipRoutes);

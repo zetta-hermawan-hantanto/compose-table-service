@@ -10,14 +10,17 @@ const SessionChatSchema = new Schema(
     // Array of messages in the chat session
     messages: [
       {
-        sender: { type: String, enum: ['user', 'ai'], required: true },
+        role: { type: String, enum: ['user', 'assistant'] },
 
-        content: { type: String, required: true },
+        content: { type: String },
       },
     ],
 
     // Reference to the associated dynamic table
     table_id: { type: Schema.Types.ObjectId, ref: 'dynamic_table' },
+
+    // Reference to the user who owns the session chat
+    user_id: { type: Schema.Types.ObjectId, ref: 'user', required: true },
   },
   {
     timestamps: {

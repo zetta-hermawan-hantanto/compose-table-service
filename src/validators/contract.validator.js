@@ -190,16 +190,6 @@ async function ValidateStudentsContract(contract, catalog, createdByUserId) {
       throw new Error('User ID is required');
     }
 
-    // *************** Validate contract status
-    if (contract.status !== 'ready') {
-      throw new Error('Contract status must be ready');
-    }
-
-    // *************** Validate contract intent
-    if (contract.intent !== 'generate_table') {
-      throw new Error('Contract intent must be generate_table');
-    }
-
     // *************** Validate base entity
     if (contract.base_entity !== 'students') {
       throw new Error('Base entity must be students in v1');

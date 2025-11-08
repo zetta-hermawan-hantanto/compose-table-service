@@ -283,7 +283,7 @@ async function ComposeStudentsTable(req, res) {
       tools: toolsSpec,
       tool_choice: 'auto',
     });
-    
+
     // *************** Process tool calls until AI completes or max iterations reached
     let iterationCount = 0;
     const maxIterations = 10;
@@ -488,8 +488,52 @@ async function GetAiTableById(req, res) {
   }
 }
 
+async function GetAllAiTables(req, res) {
+  try {
+    // *************** Validate req object exists
+    if (!req) {
+      throw new Error('Request object is required');
+    }
+
+    // *************** Query all dynamic tables
+    if (!req.body) {
+      throw new Error('Request body is required');
+    };
+
+    const { user_id } = req.body;
+    const tablesData = await DynamicTableModel.find({ created_by: user_id, status: 'active' });
+
+    // *************** Construct output response
+    const outputResponse = {
+      tables: tablesData.map((table) => ({
+        id: table._id,
+        name: table.name,
+        description: table.description,
+        columns: table.columns,
+        filters: table.filters,
+        status: table.status,
+        created_at: table.created_at,
+      })),
+      total_tables: tablesData.length,
+    };
+
+    return res.status(200).json(outputResponse);
+  } catch (error) {
+     // *************** Log error to database with request context
+    await ErrorLogModel.create({
+      path: 'controllers/compose.controller.js',
+      parameter_input: JSON.stringify({ params: req && req.params }),
+      function_name: 'GetAllAiTables',
+      error: String(error.stack),
+    });
+
+    return res.status(500).json({ error: error.message });
+  }
+}
+
 // *************** EXPORT MODULE ***************
 module.exports = {
   ComposeStudentsTable,
   GetAiTableById,
+  GetAllAiTables,
 };

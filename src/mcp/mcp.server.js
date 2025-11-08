@@ -1,6 +1,7 @@
 // *************** IMPORT LIBRARY ***************
 const fs = require('fs');
 const path = require('path');
+const mongoose = require('mongoose');
 
 /**
  * LoadStudentsCatalog reads the schema catalog JSON file and extracts students entity metadata.
@@ -87,6 +88,49 @@ function SearchCatalogFields(query) {
 }
 
 /**
+ * GetTableSchema retrieves table metadata for v2 modify operations.
+ * Returns columns filters and sort configuration without exposing row data.
+ * @param {string} tableId - MongoDB ObjectId of the dynamic table.
+ * @returns {Promise<object>} - Object with columns filters and optional sort.
+ * @throws {Error} - If table_id is missing or table not found.
+ */
+async function GetTableSchema(tableId) {
+  // *************** Validate table_id parameter
+  if (!tableId) {
+    throw new Error('Table ID is required');
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(tableId)) {
+    throw new Error('Invalid table ID format');
+  }
+
+  // *************** Load DynamicTable model dynamically to avoid circular dependency
+  const DynamicTableModel = require('../models/dynamic_table.model');
+
+  // *************** Query table metadata by ID
+  const tableDoc = await DynamicTableModel.findById(tableId).lean();
+
+  if (!tableDoc) {
+    throw new Error('Table not found');
+  }
+
+  // *************** Construct schema metadata response
+  const schemaMetadata = {
+    table_id: String(tableDoc._id),
+    name: tableDoc.name,
+    columns: tableDoc.columns || [],
+    filters: tableDoc.filters || [],
+  };
+
+  // *************** Include sort if defined
+  if (tableDoc.sort && tableDoc.sort.key) {
+    schemaMetadata.sort = tableDoc.sort;
+  }
+
+  return schemaMetadata;
+}
+
+/**
  * StoreContractInContext saves the committed contract in request-scoped context.
  * This is a metadata-only operation that does not persist to database.
  * @param {object} ctx - Request context object with get and set methods.
@@ -159,6 +203,20 @@ function CreateMcpServer() {
       },
       handler: function CommitPlanHandler(args, ctx) {
         return StoreContractInContext(ctx, args.contract);
+      },
+    },
+    'tables_get_schema': {
+      name: 'tables_get_schema',
+      description: 'Get current table schema for modify operations metadata only',
+      parameters: {
+        table_id: {
+          type: 'string',
+          required: true,
+          description: 'MongoDB ObjectId of the dynamic table',
+        },
+      },
+      handler: async function GetSchemaHandler(args) {
+        return await GetTableSchema(args.table_id);
       },
     },
   };
