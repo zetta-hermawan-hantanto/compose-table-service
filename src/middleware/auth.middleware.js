@@ -15,7 +15,7 @@ const ErrorLogModel = require('../models/error_log.model');
 const AuthMiddleware = async function (req, res, next) {
   try {
     // *************** Extract auth header from request
-    const authHeader = req.cookies['authorization'];
+    const authHeader = req.headers['authorization'];
 
     // *************** Validate presence of auth header
     if (!authHeader) {
