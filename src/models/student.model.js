@@ -1,7 +1,6 @@
 // *************** IMPORT CORE ***************
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
-const DateOnly = require('../../utils/common-mongoose-dateonly')(mongoose);
 
 // *************** TRANSCRIPT SCHEMA *************** 
 const transcriptSchema = new Schema(
@@ -211,10 +210,6 @@ const StudentSchema = new Schema(
     professional_email: {
       type: String,
       default: '',
-    },
-    // Date of birth
-    date_of_birth: {
-      type: DateOnly,
     },
     // Age
     age: {

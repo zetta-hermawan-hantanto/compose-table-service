@@ -5,7 +5,7 @@ const Schema = mongoose.Schema;
 const DynamicRowTableSchema = new Schema(
   {
     // Reference to the dynamic table
-    table_id: { type: Schema.Types.ObjectId, ref: 'DynamicTable', required: true },
+    dynamic_table_id: { type: Schema.Types.ObjectId, ref: 'DynamicTable', required: true },
 
     // Current status of the row
     status: {
@@ -14,16 +14,8 @@ const DynamicRowTableSchema = new Schema(
       default: 'active',
     },
 
-    // Data for each row in the dynamic table
-    data: [
-      {
-        // Column key
-        column_key: { type: String, required: true },
-
-        // Value for the column
-        value: { type: Schema.Types.Mixed, required: true },
-      },
-    ],
+    // Data for each row in the dynamic table as key value pairs
+    data: { type: Schema.Types.Mixed, required: true },
   },
   {
     // Enable timestamps for createdAt and updatedAt

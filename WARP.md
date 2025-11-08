@@ -53,12 +53,12 @@ Example:
 async function GetStudentDetails(student_id) {
   try {
     // *************** Validate parameter student_id
-    if (!student_id) throw new ApolloError('Missing student_id');
+    if (!student_id) throw new Error('Missing student_id');
 
     // *************** Retrieve the student by id
     const student = await StudentModel.findById(student_id);
 
-    if (!student) throw new ApolloError('Student not found');
+    if (!student) throw new Error('Student not found');
 
     // *************** Construct the data to align with output format
     const formattedData = {
@@ -73,7 +73,7 @@ async function GetStudentDetails(student_id) {
       function_name: 'GetStudentDetails',
       error: String(error.stack),
     });
-    throw new ApolloError(error.message);
+    throw new Error(error.message);
   }
 }
 ```
@@ -86,7 +86,7 @@ Each function must include full JSDoc explaining purpose, rationale, params, ret
  * CreateUser handles user registration logic.
  * @param {object} params - Includes name, email, and password.
  * @returns {object} - Created user document.
- * @throws {ApolloError} - If validation fails or DB error occurs.
+ * @throws {Error} - If validation fails or DB error occurs.
  */
 ```
 
@@ -139,7 +139,7 @@ try {
     function_name: 'GetUserDetails',
     error: String(error.stack),
   });
-  throw new ApolloError(error.message);
+  throw new Error(error.message);
 }
 ```
 
@@ -206,4 +206,3 @@ npm start
 - MongoDB + Mongoose
 - Joi validation
 - Nodemon for development
-

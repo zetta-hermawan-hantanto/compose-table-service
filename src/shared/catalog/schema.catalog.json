@@ -16,7 +16,6 @@
         { "name": "tele_phone", "type": "string" },
         { "name": "sex", "type": "string", "enum": ["M", "F"] },
         { "name": "civility", "type": "string", "enum": ["MR", "MRS"] },
-        { "name": "date_of_birth", "type": "date" },
         { "name": "status", "type": "string", "enum": ["active", "pending", "deleted"] },
         { "name": "student_title_status", "type": "string", "enum": ["current_active","completed","suspended","deactivated","retaking","admission","admission_need_validation","admission_ask_for_revision"] },
         { "name": "admission_status", "type": "string", "enum": ["not_received","received_inprogress","received_not_completed","received_completed"] },

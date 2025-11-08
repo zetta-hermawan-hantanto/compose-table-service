@@ -2,6 +2,9 @@
 const express = require('express');
 const cors = require('cors');
 
+// *************** IMPORT MODULE ***************
+const bilipRoutes = require('./routes/bilip.routes');
+
 // *************** Initialize Express application
 const app = express();
 
@@ -21,6 +24,9 @@ app.get('/health', (req, res) => {
   
   return res.status(200).json(healthData);
 });
+
+// *************** Mount bilip routes under /api prefix
+app.use('/api', bilipRoutes);
 
 // *************** Handle 404 for undefined routes
 app.use((req, res) => {

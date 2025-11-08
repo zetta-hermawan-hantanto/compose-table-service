@@ -41,6 +41,20 @@ const DynamicTableSchema = new Schema(
       },
     ],
 
+    // Filters applied to generate the table rows
+    filters: [
+      {
+        // Filter key representing the field path
+        key: { type: String, required: true },
+
+        // Filter operator
+        op: { type: String, required: true },
+
+        // Filter value
+        value: { type: Schema.Types.Mixed, required: true },
+      },
+    ],
+
     // Indicates if the table is filterable
     filterable: { type: Boolean, default: true },
 
