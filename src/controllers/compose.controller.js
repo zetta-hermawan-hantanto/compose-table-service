@@ -283,9 +283,7 @@ async function ComposeStudentsTable(req, res) {
       tools: toolsSpec,
       tool_choice: 'auto',
     });
-
-    console.log('Initial chat response:', chatResponse);
-
+    
     // *************** Process tool calls until AI completes or max iterations reached
     let iterationCount = 0;
     const maxIterations = 10;
