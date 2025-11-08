@@ -225,7 +225,7 @@ async function ComposeStudentsTable(req, res) {
       {
         type: 'function',
         function: {
-          name: 'db.introspect_students',
+          name: 'db_introspect_students',
           description: 'Returns metadata about students entity including all available fields',
           parameters: {
             type: 'object',
@@ -237,7 +237,7 @@ async function ComposeStudentsTable(req, res) {
       {
         type: 'function',
         function: {
-          name: 'db.search_fields',
+          name: 'db_search_fields',
           description: 'Search for fields in students catalog by keyword',
           parameters: {
             type: 'object',
@@ -254,7 +254,7 @@ async function ComposeStudentsTable(req, res) {
       {
         type: 'function',
         function: {
-          name: 'ai.commit_plan',
+          name: 'ai_commit_plan',
           description: 'Commit the final contract plan when AI agent is confident',
           parameters: {
             type: 'object',

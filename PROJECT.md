@@ -37,9 +37,9 @@ The service uses:
 └────────┬────────────────────┘
          │
          ├──► MCP Server (mcp.server.js)
-         │    └─ db.introspect_students()
-         │    └─ db.search_fields()
-         │    └─ ai.commit_plan()
+         │    └─ db_introspect_students()
+         │    └─ db_search_fields()
+         │    └─ ai_commit_plan()
          │
          ├──► MCP Client (mcp.client.js)
          │    └─ callTool()
@@ -222,7 +222,7 @@ The backend enforces the following validation rules:
 
 ## MCP Tools (Metadata-Only)
 
-### 1. `db.introspect_students()`
+### 1. `db_introspect_students()`
 
 Returns metadata about the students entity.
 
@@ -247,7 +247,7 @@ Returns metadata about the students entity.
 }
 ```
 
-### 2. `db.search_fields({ query: "email" })`
+### 2. `db_search_fields({ query: "email" })`
 
 Search for fields matching a keyword.
 
@@ -273,7 +273,7 @@ Search for fields matching a keyword.
 }
 ```
 
-### 3. `ai.commit_plan({ contract: {...} })`
+### 3. `ai_commit_plan({ contract: {...} })`
 
 Commit the final contract when AI is confident.
 

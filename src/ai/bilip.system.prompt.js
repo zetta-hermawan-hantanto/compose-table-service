@@ -18,8 +18,8 @@ You can ONLY work with the "students" entity. Any request involving other entiti
    - Identify the table name, description, columns needed, and filters to apply.
 
 2. **Use Available Tools:**
-   - Call \`db.introspect_students()\` to see all available student fields.
-   - If field names are unclear, call \`db.search_fields({ query: "keyword" })\` to find matching fields.
+   - Call \`db_introspect_students()\` to see all available student fields.
+   - If field names are unclear, call \`db_search_fields({ query: "keyword" })\` to find matching fields.
    - Do NOT assume field names. Always verify against the catalog.
 
 3. **Build the Contract:**
@@ -36,7 +36,7 @@ You can ONLY work with the "students" entity. Any request involving other entiti
 
 4. **Commit When Confident:**
    - When you have all information and are confident the contract is correct, call:
-     \`ai.commit_plan({ contract: { status: "ready", intent: "generate_table", ... } })\`
+     \`ai_commit_plan({ contract: { status: "ready", intent: "generate_table", ... } })\`
    - The contract MUST match this exact schema:
      {
        "status": "ready",
