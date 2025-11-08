@@ -5,7 +5,7 @@ const Schema = mongoose.Schema;
 const DynamicRowTableSchema = new Schema(
   {
     // Reference to the dynamic table
-    dynamic_table_id: { type: Schema.Types.ObjectId, ref: 'DynamicTable', required: true },
+    dynamic_table_id: { type: Schema.Types.ObjectId, ref: 'dynamic_table', required: true },
 
     // Current status of the row
     status: {
@@ -27,4 +27,4 @@ const DynamicRowTableSchema = new Schema(
 );
 
 // *************** EXPORT MODULE ***************
-module.exports = mongoose.model('DynamicRowTable', DynamicRowTableSchema);
+module.exports = mongoose.model('dynamic_row_table', DynamicRowTableSchema);

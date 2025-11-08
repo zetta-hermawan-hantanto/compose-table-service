@@ -74,4 +74,4 @@ const DynamicTableSchema = new Schema(
 );
 
 // *************** EXPORT MODULE ***************
-module.exports = mongoose.model('DynamicTable', DynamicTableSchema);
+module.exports = mongoose.model('dynamic_table', DynamicTableSchema);
