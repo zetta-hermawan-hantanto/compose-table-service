@@ -1,526 +1,169 @@
-# Compose Table Service – v1 (Students Only)
+# Compose Table Service – BILIP v1 & v2
 
-## Overview
+## Executive Summary
+BILIP is the chat-first AI that composes DynamicTable definitions and DynamicRowTable rows for the students catalog using natural-language prompts. v1 delivers the students-only, one-shot `/api/bilip/compose` flow that validates AI contracts, materializes rows, and returns an immediate preview. **v2 Delta:** introduces stateful SessionChat conversations that span create and modify intents, add optional sorting, enforce envelopes, and persist transcripts plus summaries for the frontend. Backward compatibility remains guaranteed because the legacy endpoints, validators, and Mongo models stay untouched while v2 capabilities ride behind the `BILIP_V2_ENABLED` feature flag.
 
-The **Compose Table Service** is an AI-driven backend service that enables users to generate dynamic tables from natural language requests. Version 1 (v1) is scoped exclusively to the **students** entity, allowing users to create custom filtered views of student data without writing queries manually.
+## Scope & Non-Goals
+### In Scope (v2)
+- Conversational SessionChat lifecycles that store every turn and reuse conversation_id across requests.
+- Create + modify flows that share catalog validation, reuse v1 contract rules, and materialize DynamicRowTable rows.
+- Filters with catalog-backed keys, optional sorting asc/desc, and row guard enforcement prior to heavy queries.
+- Structured envelopes (clarification, success-create, success-modify, failure) that include summaries, explanations, and options.
+- messages[] transcript management so the frontend can mirror the full conversation context per turn.
+- Row rebuild policy covering all column/filter/sort edits to keep DynamicRowTable data in sync.
 
-The service uses:
-- **OpenAI GPT** for natural language understanding and contract generation
-- **MCP (Model Context Protocol)** for AI agent tool access (metadata-only, in-process)
-- **MongoDB** for data storage (students, dynamic tables, and row data)
-- **Express.js** for RESTful API endpoints
+### Non-Goals
+- Exports (CSV/Excel or background jobs) remain out-of-scope.
+- Multi-collection joins or schema cloning/history for DynamicTable definitions.
+- PII masking or advanced governance on student documents beyond existing catalog constraints.
+- Background workers for large exports or asynchronous rebuild pipelines.
 
-## Architecture
+## System Architecture
+- **Frontend:** Chat UI + My Tables view consume envelopes, render messages[], and refresh tables via `result.summary`.
+- **AI Layer:** BILIP runs on `gpt-5-mini-2025-08-07`, receives the strict system prompt, and calls MCP metadata-only tools.
+- **Backend:** Express routes feed middleware, validators, chat/compose controllers, services, and query/row utilities following WARP (Validation → Query → Transformation → Output).
+- **Database:** MongoDB stores DynamicTable definitions, DynamicRowTable rows, SessionChat transcripts, and ErrorLog entries for observability.
+**v2 Delta:** introduces ChatService orchestration, MCP `tables_get_schema`, SessionChat persistence, and row estimator utilities layered on top of the existing compose stack.
 
-### High-Level Flow
+## Feature Flags
+- `BILIP_V2_ENABLED` gates registration of `/api/bilip/chat` and `/api/bilip/chat/:conversation_id` plus their controller/service wiring.
+- Default off in prod; on in staging; instant rollback by flipping false.
+- When the flag is false the system exposes only v1 endpoints, ensuring we can ship the v2 stack without risking existing traffic.
 
-1. **User Request**: User sends natural language request to `/api/bilip/compose`
-2. **MCP Initialization**: System creates in-process MCP server and client
-3. **AI Agent Orchestration**: OpenAI GPT uses MCP tools to introspect catalog and build contract
-4. **Contract Validation**: Backend validates AI-generated contract against business rules
-5. **Query Execution**: System builds MongoDB filter and queries students collection
-6. **Row Transformation**: Student documents are transformed into table rows
-7. **Persistence**: Dynamic table definition and rows are saved to database
-8. **Response**: API returns table metadata and row count
+## Data Models
+### DynamicTable
+DynamicTable: name, description, status, columns[], filters[], optional sort { key, dir }, created_by, timestamps, indexes. Each record defines the canonical table contract (labels, column keys, filter DSL, and optional `sort`) plus ownership metadata; indexes focus on `{ created_by, name }` uniqueness and status filters for faster list queries.
 
-### Component Architecture
+### DynamicRowTable
+DynamicRowTable: table_id, data[], status, timestamps; indexed by table_id and created_at. Every row document stores the denormalized student data for a DynamicTable, ties back via `dynamic_table_id`, and is regenerated whenever definitions change.
 
-```
-┌─────────────────┐
-│   User Request  │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────────────────┐
-│  POST /api/bilip/compose    │
-│  (compose.controller.js)    │
-└────────┬────────────────────┘
-         │
-         ├──► MCP Server (mcp.server.js)
-         │    └─ db_introspect_students()
-         │    └─ db_search_fields()
-         │    └─ ai_commit_plan()
-         │
-         ├──► MCP Client (mcp.client.js)
-         │    └─ callTool()
-         │    └─ getLastContract()
-         │
-         ├──► OpenAI API
-         │    └─ Chat Completions with Function Calling
-         │
-         ├──► Contract Validator (contract.validator.js)
-         │    └─ ValidateStudentsContract()
-         │
-         ├──► MongoDB Query
-         │    └─ StudentModel.find()
-         │
-         └──► Database Persistence
-              └─ DynamicTableModel.create()
-              └─ DynamicRowTableModel.insertMany()
-```
+### SessionChat
+SessionChat: user_id, table_id?, messages[{sender,content,timestamp}], timestamps; created on first chat turn; FE sends conversation_id: null to start. The model keeps chronological `{ role: 'user'|'assistant', content }` entries, remembers the table_id once one is produced, and powers transcript reads.
 
-## API Endpoints
+### ErrorLog
+ErrorLog: { path, parameter_input, function_name, error } used by try/catch everywhere. Controllers, services, and validators persist failure context here before rethrowing so ops can trace feature-flagged rollouts.
 
-### 1. POST `/api/bilip/compose`
+## MCP Tools (Metadata Only)
+- **db_introspect_students()** – returns `{ base_entity: 'students', fields[] }` straight from `schema.catalog.json` so BILIP knows the valid sources.
+- **db_search_fields({ query })** – fuzzy matches catalog labels/keys to disambiguate prompt terms before drafting contracts.
+- **tables_get_schema({ table_id })** – loads `{ table_id, name, columns[], filters[], sort? }` for modify intents so AI reasons about concrete changes.
+Rule: No data reads via MCP; metadata only.
 
-Generate a dynamic table from natural language request.
+## Endpoints
+### v2 (Flagged)
+| Method | Path | Purpose | Request Highlights | Response |
+| --- | --- | --- | --- | --- |
+| POST | `/api/bilip/chat` | Chat turn handler for create/modify. | Body: `{ prompt, conversation_id|null, table_id|null, user_id }`. | Returns one of the envelopes below (clarification, success-create, success-modify, failure). |
+| GET | `/api/bilip/chat/:conversation_id` | Fetch SessionChat transcript. | Path param `conversation_id`; optional query uses auth context to scope to owner. | `{ conversation_id, table_id|null, messages[], created_at, updated_at }`. |
+`BILIP_V2_ENABLED` must be true for these routes to mount; the POST endpoint both orchestrates AI + MCP + validators and returns the envelope, while the GET endpoint is a pure read on SessionChat.
 
-**Request Body:**
+### v1 (Unchanged)
+| Method | Path | Purpose | Request Highlights | Response |
+| --- | --- | --- | --- | --- |
+| POST | `/api/bilip/compose` | v1 one-shot DynamicTable creation. | Body: `{ user_id, message }`; AI contract committed via MCP before hitting backend validator. | `{ table_id, name, description, total_rows, columns[], filters[] }` plus any validation errors surfaced as HTTP 4xx/5xx. |
+| GET | `/api/ai-tables/:id` | Fetch table metadata + preview rows. | Path param `id` referencing `DynamicTable._id`. | `{ table, rows[], total_rows_preview }` for demo rendering; unchanged between v1 and v2. |
+**v2 Delta:** the new chat endpoints do not replace `/api/bilip/compose`; FE chooses the experience by checking the flag and surfacing either the conversational UI or legacy composer.
+
+## AI Response Envelopes
+Every chat API response includes a messages[] transcript.
+
+### Clarification
+Used when AI needs more input before committing changes.
 ```json
 {
-  "user_id": "507f1f77bcf86cd799439011",
-  "message": "Show me active students from School A who haven't submitted job descriptions"
+  "status": "need_clarification",
+  "conversation_id": "64f...",
+  "messages": [{ "role": "ai", "message": "Which cohort should I filter?" }]
 }
 ```
 
-**Response (200 OK):**
-```json
-{
-  "table_id": "507f191e810c19729de860ea",
-  "name": "Active Students Missing Job Desc",
-  "description": "Students who are active and missing job descriptions",
-  "total_rows": 42,
-  "columns": [
-    {
-      "label": "Student Name",
-      "key": "student_name",
-      "data_type": "string",
-      "source": {
-        "collection": "students",
-        "field": "first_name + ' ' + last_name"
-      }
-    },
-    {
-      "label": "Email",
-      "key": "email",
-      "data_type": "string",
-      "source": {
-        "collection": "students",
-        "field": "email"
-      }
-    }
-  ],
-  "filters": [
-    {
-      "key": "students.status",
-      "op": "eq",
-      "value": "active"
-    },
-    {
-      "key": "students.school",
-      "op": "eq",
-      "value": "School A"
-    }
-  ]
-}
-```
-
-**Error Response (500):**
-```json
-{
-  "error": "Result too large for demo; please add more filters. Current result: 6234 rows."
-}
-```
-
-### 2. GET `/api/ai-tables/:id`
-
-Retrieve a previously generated table with preview rows.
-
-**Response (200 OK):**
-```json
-{
-  "table": {
-    "id": "507f191e810c19729de860ea",
-    "name": "Active Students Missing Job Desc",
-    "description": "Students who are active and missing job descriptions",
-    "columns": [...],
-    "filters": [...],
-    "status": "active",
-    "created_at": "2025-11-08T00:00:00.000Z"
-  },
-  "rows": [
-    {
-      "id": "507f191e810c19729de860eb",
-      "data": {
-        "student_name": "John DOE",
-        "email": "john.doe@example.com"
-      },
-      "created_at": "2025-11-08T00:00:00.000Z"
-    }
-  ],
-  "total_rows_preview": 42
-}
-```
-
-## Contract Schema
-
-The AI agent must commit a contract with this exact structure:
-
+### Success — Create
+Returned after a validated generate_table intent, materialized rows, and SessionChat update.
 ```json
 {
   "status": "ready",
   "intent": "generate_table",
-  "table_name": "Active Students Missing Job Desc",
-  "description": "Students who are active and missing job descriptions",
-  "base_entity": "students",
-  "columns": [
-    {
-      "label": "Student Name",
-      "key": "student_name",
-      "data_type": "string",
-      "source": {
-        "collection": "students",
-        "field": "first_name + ' ' + last_name"
-      }
-    }
-  ],
-  "filters": [
-    {
-      "key": "students.status",
-      "op": "eq",
-      "value": "active"
-    }
-  ]
+  "conversation_id": "64f...",
+  "table_id": "65a...",
+  "messages": [{ "role": "ai", "message": "Table created with 128 rows." }],
+  "result": { "summary": {
+    "table_id": "65a...",
+    "name": "Active Seniors",
+    "total_rows": 128,
+    "columns": ["student_name", "email"],
+    "filters": [{ "key": "students.status", "op": "eq", "value": "active" }],
+    "sort": { "key": "students.email", "dir": "asc" }
+  }}
 }
 ```
 
-## Validation Rules
-
-The backend enforces the following validation rules:
-
-### Contract-Level
-- `status` must be `"ready"`
-- `intent` must be `"generate_table"`
-- `base_entity` must be `"students"` (v1 scope)
-
-### Table Name
-- Maximum 60 characters
-- Only alphanumeric characters, spaces, dashes, and underscores: `[A-Za-z0-9 _-]`
-- Must be unique per user (per `created_by`)
-
-### Columns
-- At least one column required
-- Each column must have: `label`, `key`, `data_type`, `source`
-- `data_type` must be one of: `string`, `number`, `boolean`, `date`
-- `source.collection` must be `"students"`
-- `source.field` must either:
-  - Exist in catalog as a direct field, OR
-  - Be a computed expression: `field1 + ' ' + field2` (both fields must exist and be strings)
-- All column `key` values must be unique
-
-### Filters
-- **At least one filter is REQUIRED**
-- Each filter must have: `key`, `op`, `value`
-- `key` must start with `"students."` and reference an existing catalog field
-- `op` must be one of: `eq`, `ne`, `in`, `contains`, `gte`, `lte`
-- `value` type must match the catalog field type
-- Special case: `in` operator requires array value
-
-### Row Limits
-- Maximum 5000 rows returned
-- If query exceeds 5000, request is rejected with error message
-
-## MCP Tools (Metadata-Only)
-
-### 1. `db_introspect_students()`
-
-Returns metadata about the students entity.
-
-**Parameters:** None
-
-**Returns:**
+### Success — Modify
+Returned after applying modify_table changes, deleting rows, and rebuilding.
 ```json
 {
-  "base_entity": "students",
-  "fields": [
-    {
-      "key": "first_name",
-      "label": "first_name",
-      "data_type": "string"
-    },
-    {
-      "key": "email",
-      "label": "email",
-      "data_type": "string"
-    }
-  ]
+  "status": "ready",
+  "intent": "modify_table",
+  "conversation_id": "64f...",
+  "table_id": "65a...",
+  "messages": [{ "role": "ai", "message": "Applied changes and rebuilt 130 rows." }],
+  "result": { "summary": { "table_id": "65a...", "name": "Active Seniors", "total_rows": 130, "columns": ["student_name", "email", "campus"], "filters": [ ... ], "sort": { "key": "students.email", "dir": "desc" } }}
 }
 ```
 
-### 2. `db_search_fields({ query: "email" })`
-
-Search for fields matching a keyword.
-
-**Parameters:**
-- `query` (string, required): Search term
-
-**Returns:**
+### Failure
+Used for validation issues, guards, or unexpected runtime problems.
 ```json
 {
-  "query": "email",
-  "matches": [
-    {
-      "key": "email",
-      "label": "email",
-      "data_type": "string"
-    },
-    {
-      "key": "professional_email",
-      "label": "professional_email",
-      "data_type": "string"
-    }
-  ]
+  "status": "failed",
+  "conversation_id": "64f...",
+  "table_id": "65a...",
+  "messages": [{ "role": "ai", "message": "I cannot process that request." }],
+  "explanation": "Sort direction must be asc or desc.",
+  "options": ["Use asc", "Use desc"]
 }
 ```
 
-### 3. `ai_commit_plan({ contract: {...} })`
+## Chat & Modify Flows
+**Create Flow:** (1) User sends `prompt` with `conversation_id=null` and no `table_id`. (2) Chat controller opens SessionChat, appends the user message, and AI may issue clarification until it has table name, columns, and ≥1 filter. (3) Contract.validator enforces v1 rules, row estimation runs, and on success the service creates DynamicTable + DynamicRowTable rows, updates the session `table_id`, and returns Success — Create with summary.
 
-Commit the final contract when AI is confident.
+**Modify Flow:** (1) User sends `prompt` with existing `conversation_id` and `table_id`. (2) Chat service loads the table schema through MCP `tables_get_schema`, validates `changes` via modify.validator, and applies adds/removes/updates on columns, filters, name, description, and sort. (3) Any change to columns, filters, or sort triggers delete-and-rebuild of DynamicRowTable rows. (4) Success — Modify summarizes the new configuration and row count.
 
-**Parameters:**
-- `contract` (object, required): Complete contract object
+**Transcript Handling:** Both controller methods append `{ role: 'user' | 'assistant', content }` to SessionChat and every envelope echoes the current `messages[]`, so FE can always render the turn history. Row guard checks occur before DB writes on create and after modifications propose new filters; clarifications return quickly to keep conversations tight.
 
-**Returns:**
-```json
-{
-  "success": true,
-  "message": "Contract committed to context"
-}
-```
+## Validation & Guardrails
+- Operators: eq, ne, in, contains, gte, lte.
+- At least one filter is required to create a table.
+- Sorting supports only asc or desc.
+- Reject if estimated rows > 5000; return failure envelope with explanation and options to narrow.
+- Create path reuses `ValidateStudentsContract`; modify path forces arrays for `columns`/`filters` payloads when present and ensures sort.dir ∈ {asc, desc} plus sort.key exists in catalog or current columns.
+- Filters must start with `students.` and align with the catalog data types; `contains` maps to case-insensitive regex, `in` expects arrays.
+- Row guard runs via `EstimateRowCount` before row inserts; modify validator also checks computed column conflicts and impossible updates.
 
-## File Structure
+## Error Protocol
+- Controllers, services, and validators wrap logic in try/catch blocks; each catch logs `{ path, parameter_input, function_name, error }` into ErrorLog before responding.
+- Failure responses always use the Failure envelope with `messages[]`, human-readable `explanation`, and actionable `options` so FE shows precise guidance.
+- Unexpected exceptions (e.g., AI timeout, Mongo error) return HTTP 500 plus the structured envelope to keep clients resilient while ops reviews ErrorLog entries.
 
-```
-/src
-  /ai
-    bilip.system.prompt.js       # System prompt for OpenAI GPT agent
-  /config
-    database.js                  # MongoDB connection configuration
-  /controllers
-    compose.controller.js        # Main orchestration logic
-  /mcp
-    mcp.server.js                # In-process MCP server with metadata tools
-    mcp.client.js                # MCP client for tool invocation
-  /models
-    dynamic_table.model.js       # Table definition schema
-    dynamic_row_table.model.js   # Row data schema
-    error_log.model.js           # Error logging schema
-    student.model.js             # Student entity schema
-  /routes
-    bilip.routes.js              # API route definitions
-  /shared
-    /catalog
-      schema.catalog.json        # Single source of truth for entity fields
-  /validators
-    contract.validator.js        # Contract validation logic
-  app.js                         # Express application setup
-  server.js                      # Server entry point
-```
+## Frontend Integration Notes
+- Start a session by calling `POST /api/bilip/chat` with `conversation_id: null`; persist the returned `conversation_id` for subsequent turns.
+- Provide `table_id` on modify prompts so MCP can fetch schema and validators know which DynamicTable to mutate.
+- Render the latest `messages[]` transcript after every response, keeping assistant/user turns visible; `options[]` map directly to quick replies.
+- On `status=need_clarification`, prompt the user for the requested data; on `status=failed`, surface the explanation and suggested options before allowing another turn.
+- After any `status=ready`, sync the relevant table view using `result.summary` (name, columns[], filters[], optional sort, total_rows) and refresh any My Tables listing if needed.
 
-## Environment Variables
+## Testing & Verification
+- **Smoke:** `/api/bilip/compose` v1 path still creates tables; `/api/bilip/chat` create and modify flows work end-to-end when the flag is on.
+- **Failure:** invalid sort direction, unknown fields, missing prompt/user_id, and the >5000 row guard all return structured Failure envelopes with options.
+- **Transcript:** `GET /api/bilip/chat/:conversation_id` returns the full messages[] history, table_id linkage, and timestamps for UI playback.
+- **Row Rebuild:** modifying columns/filters/sort deletes + rebuilds rows, and the returned `total_rows` matches Mongo counts.
+- **Clarification:** AI can pause for more info without writing data; ensure FE loops user input back with the same conversation_id.
 
-Required environment variables:
+## Backward Compatibility
+v1 routes (`/api/bilip/compose`, `/api/ai-tables/:id`), validators, catalog contracts, and DynamicRowTable materialization logic remain intact; `BILIP_V2_ENABLED=false` keeps production behavior identical to pre-v2 deployments while the new chat stack coexists safely.
 
-```bash
-# MongoDB
-MONGODB_URI=mongodb://localhost:27017/compose_table_db
-
-# OpenAI
-OPENAI_API_KEY=sk-...
-
-# Model Selection (optional, defaults to gpt-4o-mini)
-BILIP_MODEL=gpt-4o-mini
-```
-
-## Code Conventions (WARP.md)
-
-This project strictly follows the **Pendekar Backend Law** (WARP.md):
-
-### File Structure Banners
-- `// *************** IMPORT CORE ***************`
-- `// *************** IMPORT LIBRARY ***************`
-- `// *************** IMPORT MODULE ***************`
-- `// *************** IMPORT HELPER FUNCTION ***************`
-- `// *************** IMPORT VALIDATOR ***************`
-- `// *************** HELPER FUNCTION ***************`
-- `// *************** VALIDATOR ***************`
-- `// *************** QUERY ***************`
-- `// *************** MUTATION ***************`
-- `// *************** EXPORT MODULE ***************`
-
-### Inline Comments
-Every logical block inside functions uses:
-```javascript
-// *************** Explain what or why this block does
-```
-
-### Function Flow
-All functions follow: **Validation → Query → Transformation → Output**
-
-### Naming Conventions
-- Functions: `PascalCase` (e.g., `ValidateStudentsContract`)
-- Variables: `camelCase` (e.g., `studentData`)
-- Schema Fields: `snake_case` (e.g., `created_at`)
-- Constants: `SCREAMING_SNAKE_CASE` (e.g., `MAX_ROWS`)
-
-### Error Handling
-Every function has `try/catch`. On error:
-1. Log to `ErrorLogModel` with path, parameters, function name, and stack trace
-2. Throw `Error` with clear message
-
-### No Nested Functions
-All helper functions are top-level, never defined inside other functions.
-
-### JSDoc Required
-Every exported function has full JSDoc explaining purpose, rationale, params, returns, and errors.
-
-## Database Models
-
-### DynamicTable
-```javascript
-{
-  _id: ObjectId,
-  name: String,
-  description: String,
-  status: 'active' | 'deleted',
-  columns: [{
-    label: String,
-    key: String,
-    data_type: 'string' | 'number' | 'boolean' | 'date',
-    source: {
-      collection: String,
-      field: String
-    }
-  }],
-  filters: [{
-    key: String,
-    op: String,
-    value: Mixed
-  }],
-  filterable: Boolean,
-  sortable: Boolean,
-  created_by: ObjectId,
-  created_at: Date,
-  updated_at: Date
-}
-```
-
-### DynamicRowTable
-```javascript
-{
-  _id: ObjectId,
-  dynamic_table_id: ObjectId,
-  status: 'active' | 'deleted',
-  data: {
-    [column_key]: Mixed
-  },
-  created_at: Date,
-  updated_at: Date
-}
-```
-
-## Edge Cases Handled
-
-### 1. Missing User ID or Message
-**Error:** `"Missing user_id"` or `"Missing message"`
-
-### 2. AI Agent Doesn't Commit Contract
-**Error:** `"AI agent did not commit a contract. Please provide more details or clarify your request."`
-
-### 3. No Filters Provided
-**Error:** `"Please add at least one filter"`
-
-### 4. Duplicate Table Name
-**Error:** `"Table name already exists. Choose a different name."`
-
-### 5. Result Set Too Large
-**Error:** `"Result too large for demo; please add more filters. Current result: 6234 rows."`
-
-### 6. Unknown Field in Contract
-**Error:** `"Column 0 source.field xyz not found in catalog"`
-
-### 7. Invalid Computed Expression
-**Error:** `"Column 0 computed expression invalid: Field first_name must be string type for concatenation"`
-
-### 8. Invalid Operator
-**Error:** `"Filter 0 operator regex not allowed in v1"`
-
-### 9. Type Mismatch
-**Error:** `"Filter 1 value validation failed: Value must be number type"`
-
-## Testing Manually
-
-### Example Request 1: Basic Filter
-```bash
-curl -X POST http://localhost:3000/api/bilip/compose \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "507f1f77bcf86cd799439011",
-    "message": "Show me all active students"
-  }'
-```
-
-### Example Request 2: Multiple Filters with Computed Column
-```bash
-curl -X POST http://localhost:3000/api/bilip/compose \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "507f1f77bcf86cd799439011",
-    "message": "List students from School A with status active, show their full name and email"
-  }'
-```
-
-### Example Request 3: Retrieve Table
-```bash
-curl http://localhost:3000/api/ai-tables/507f191e810c19729de860ea
-```
-
-## Future Enhancements (v2+)
-
-Potential future scope expansions:
-- Support for additional entities (teachers, classes, schools)
-- Join operations across multiple entities
-- Aggregation functions (count, sum, average)
-- Sorting and pagination
-- Export to CSV/Excel
-- Scheduled table regeneration
-- Collaborative table sharing
-
-## Development Notes
-
-- **No Tests**: Per project requirements, no test files are included
-- **No Optional Chaining**: All guards use explicit `if (!value)` checks
-- **Explicit Error Logging**: Every error is logged to `ErrorLogModel` before rethrowing
-- **Named Returns**: All functions return via named variables, not inline objects
-- **Request-Scoped Context**: MCP client maintains separate context per request
-- **Catalog as Source of Truth**: All field validation references `schema.catalog.json`
-
-## Troubleshooting
-
-### Issue: "OPENAI_API_KEY environment variable not configured"
-**Solution:** Set the `OPENAI_API_KEY` in your `.env` file
-
-### Issue: "Students entity not found in catalog"
-**Solution:** Verify `src/shared/catalog/schema.catalog.json` contains students entity
-
-### Issue: AI agent timeout or max iterations reached
-**Solution:** Simplify the user message or add more specific details
-
-### Issue: MongoDB connection error
-**Solution:** Verify `MONGODB_URI` is correct and MongoDB server is running
-
-## License
-
-Internal project. All rights reserved.
-
-## Contributors
-
-- Backend Team following Pendekar Backend Law (WARP.md)
-- AI Implementation: GPT-driven contract generation
-- Architecture: Microservice pattern with in-process MCP
-
----
-
-**Version:** 1.0.0  
-**Last Updated:** 2025-11-08  
-**Status:** Production Ready (Students-Only Scope)
+## Changelog
+- Added `/api/bilip/chat` with conversational envelopes for create + modify intents.
+- Added `/api/bilip/chat/:conversation_id` transcript retrieval backed by SessionChat.
+- Added modify operations (add/remove/update columns and filters, rename tables) plus optional sorting asc/desc.
+- Added delete-and-rebuild row workflow tied to schema/filter/sort changes and enforced row guard.
+- Added MCP `tables_get_schema`, AIReasoner utilities, and persisted messages[] transcripts across every response.

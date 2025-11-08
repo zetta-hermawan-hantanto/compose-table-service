@@ -34,12 +34,12 @@ const AuthMiddleware = async function (req, res, next) {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     // *************** Validate decoded payload
-    if (!decoded || !decoded.userId) {
+    if (!decoded || !decoded._id) {
       return res.status(401).json({ error: 'Unauthorized', message: 'Invalid token' });
     }
 
     // *************** Attach user ID to request object
-    req.userId = decoded.userId;
+    req.userId = decoded._id;
 
     // *************** Proceed to next middleware or route handler
     next();
