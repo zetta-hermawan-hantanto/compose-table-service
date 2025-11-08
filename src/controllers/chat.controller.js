@@ -1,6 +1,8 @@
-// *************** IMPORT MODULE ***************
+// *************** IMPORT MODULES ***************
 const SessionChatModel = require('../models/session_chat.model');
 const ErrorLogModel = require('../models/error_log.model');
+
+// *************** IMPORT SERVICE ***************
 const { ProcessChatTurn } = require('../services/chat.service');
 
 /**
@@ -29,11 +31,15 @@ async function HandleChatTurn(req, res) {
     }
 
     // *************** Validate user_id parameter
-    if (!req.body.user_id) {
+    const userId = req.userId;
+
+    // *************** Validate user_id presence
+    if (!userId) {
       throw new Error('Missing user_id');
     }
 
-    const { prompt, conversation_id, table_id, user_id } = req.body;
+    // *************** Extract parameters from request body
+    const { prompt, conversation_id, table_id } = req.body;
 
     // *************** Load or create session based on conversation_id
     let session;
@@ -48,7 +54,7 @@ async function HandleChatTurn(req, res) {
     } else {
       // *************** Create new session for first turn
       session = await SessionChatModel.create({
-        user_id: user_id,
+        user_id: userId,
         table_id: table_id || null,
         messages: [],
       });
@@ -66,7 +72,7 @@ async function HandleChatTurn(req, res) {
     const serviceResult = await ProcessChatTurn({
       messages: session.messages,
       session: session,
-      user_id: user_id,
+      user_id: userId,
     });
 
     // *************** Extract AI message from service result

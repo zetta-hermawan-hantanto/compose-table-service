@@ -12,7 +12,17 @@ const { AuthMiddleware } = require('./middleware/auth.middleware');
 const app = express();
 
 // *************** Configure global middleware
-app.use(cors());
+const corsOptions = {
+  origin: ['http://localhost:4200'],                      
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  credentials: true,
+  maxAge: 86400,
+};
+
+// *************** Apply CORS middleware
+app.use(cors(corsOptions));  
+
+// *************** Apply JSON and URL-encoded body parsers
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -28,8 +38,8 @@ app.get('/health', (req, res) => {
   return res.status(200).json(healthData);
 });
 
-// // *************** Add authentication middleware
-// app.use(AuthMiddleware);
+// *************** Apply authentication middleware globally
+app.use(AuthMiddleware);
 
 // *************** Mount bilip routes under /api prefix
 app.use('/api', bilipRoutes);

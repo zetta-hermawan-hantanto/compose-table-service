@@ -227,7 +227,7 @@ async function HandleChatTurn(req, res) {
       status: 'failed',
       conversation_id: req.body.conversation_id || null,
       table_id: req.body.table_id || null,
-      messages: [{ role: 'ai', message: 'An error occurred processing your request.' }],
+      messages: [{ role: 'assistant', message: 'An error occurred processing your request.' }],
       explanation: error.message,
       options: ['Please try again', 'Rephrase your request'],
     };
@@ -260,7 +260,6 @@ async function HandleChatTurn(req, res) {
 4. **Handle generate_table** (CREATE):
    - Load catalog
    - Call `ValidateStudentsContract(envelope.contract, catalog, user_id)` (v1 validator)
-   - Call `EstimateRowCount()` → if > 5000, return Failure envelope
    - Create `DynamicTable` (include `sort` if present)
    - Build query: filter + projection + sort
    - Query `StudentModel.find().select().sort().lean()`
@@ -314,11 +313,6 @@ async function RebuildTableRows(table) {
     .select(projection)
     .sort(sortConfig)
     .lean();
-
-  // *************** Check row guard
-  if (studentDocs.length > 5000) {
-    throw new Error('Row count exceeds 5000 limit after rebuild');
-  }
 
   // *************** Transform rows
   const rowsToInsert = studentDocs.map((doc) => {

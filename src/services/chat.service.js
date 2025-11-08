@@ -7,14 +7,18 @@ const { CreateMcpServer } = require('../mcp/mcp.server');
 const { CreateMcpClient } = require('../mcp/mcp.client');
 const { GetBilipV2SystemPrompt } = require('../ai/bilip_v2.system.prompt');
 const { CallAIWithEnvelope } = require('../utils/ai.reasoner');
-const { ValidateStudentsContract } = require('../validators/contract.validator');
-const { ValidateModifyContract } = require('../validators/modify.validator');
 const { BuildMongoFilter, BuildProjection, BuildSort } = require('../utils/query.builders');
 const { EstimateRowCount } = require('../utils/row.estimator');
+
+// *************** IMPORT MODULES ***************
 const StudentModel = require('../models/student.model');
 const DynamicTableModel = require('../models/dynamic_table.model');
 const DynamicRowTableModel = require('../models/dynamic_row_table.model');
 const ErrorLogModel = require('../models/error_log.model');
+
+// *************** IMPORT VALIDATORS ***************
+const { ValidateStudentsContract } = require('../validators/contract.validator');
+const { ValidateModifyContract } = require('../validators/modify.validator');
 
 /**
  * ResolveStudentValue extracts column value from student document.
@@ -88,11 +92,6 @@ async function RebuildTableRows(table) {
     .select(projection)
     .sort(sortConfig)
     .lean();
-
-  // *************** Enforce row guard after rebuild
-  if (studentDocs.length > 5000) {
-    throw new Error('Row count exceeds 5000 limit after rebuild. Please add more specific filters.');
-  }
 
   // *************** Transform student documents to row data
   const rowsToInsert = studentDocs.map((doc) => {
@@ -247,24 +246,6 @@ async function ProcessChatTurn(params) {
 
       // *************** Estimate row count for guard check
       const estimatedCount = await EstimateRowCount(validatedContract.filters, StudentModel);
-
-      if (estimatedCount > 5000) {
-        // *************** Return Failure envelope for row guard
-        const rowGuardFailure = {
-          status: 'failed',
-          conversation_id: params.session._id ? String(params.session._id) : null,
-          table_id: null,
-          messages: [{ role: 'assistant', message: 'Result set too large for demo environment.' }],
-          explanation: `Query would return approximately ${estimatedCount} rows, exceeding the 5000 row limit.`,
-          options: [
-            'Add more specific filters (e.g., date range, specific school)',
-            'Narrow existing filter values',
-            'Use contains operator for more targeted search',
-          ],
-        };
-
-        return rowGuardFailure;
-      }
 
       // *************** Build MongoDB query components
       const mongoFilter = BuildMongoFilter(validatedContract.filters);

@@ -153,22 +153,6 @@ You MUST respond in one of four envelope formats. NEVER mix plain text with enve
    - Adding duplicate column keys → Return Failure
    - Invalid sort dir → Return Failure with options ["asc", "desc"]
    - Sort key must be a catalog field or existing column source
-
-6. **ROW GUARD (>5000):**
-   - If you predict filters will return > 5000 rows, return Failure envelope:
-     \`\`\`json
-     {
-       "status": "failed",
-       "message": "Result set too large for demo.",
-       "explanation": "Current filters may return more than 5000 rows.",
-       "options": [
-         "Add more specific filters (e.g., school, status, date range)",
-         "Narrow existing filter values",
-         "Use 'contains' operator for more targeted search"
-       ]
-     }
-     \`\`\`
-
 **VALIDATION RULES:**
 
 CREATE:
