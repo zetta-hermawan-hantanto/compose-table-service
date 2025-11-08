@@ -75,6 +75,24 @@ async function GetAiTableById(req, res) {
   }
 }
 
+/**
+ * @function GetAllAiTables
+ * @description
+ * Retrieve all active AI-composed dynamic tables created by the authenticated user.
+ * This function is responsible for fetching all dynamic tables linked to a specific user (via `created_by` field)
+ * to display in the “My Tables” section. It enforces validation on the request object and ensures
+ * proper error logging for any unexpected behavior. This endpoint helps the frontend list tables
+ * that were composed via the AI assistant.
+ * 
+ * @param {Object} req - Express request object.
+ * @param {Object} res - Express response object.
+ * @property {string} req.userId - The authenticated user’s ID (injected by auth middleware).
+ * 
+ * @returns {Promise<Object>} 200 - JSON response with tables and total count.
+ * @returns {Promise<Object>} 500 - JSON response with error message when an exception occurs.
+ * 
+ * @throws {Error} If `req` or `req.params` is missing.
+ */
 async function GetAllAiTables(req, res) {
   try {
     // *************** Validate req object exists
