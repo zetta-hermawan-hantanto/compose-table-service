@@ -147,12 +147,27 @@ function BuildCsvFromRows({ columns, rows, delimiter }) {
     const record = rows[rowIndex];
     const dataCells = [];
 
-    // *************** Extract values for each column in order
     for (let colIndex = 0; colIndex < columns.length; colIndex++) {
       const columnName = columns[colIndex];
-      const rawValue = record[columnName];
-      const formattedValue = FormatCsvCellValue(rawValue, delimiterChar);
-      dataCells.push(formattedValue);
+      const columnArrays = columnName.split('.');
+
+      if (columnArrays.length > 1) {
+        const key = columnArrays[0];
+
+        const keyCollection = record[key];
+
+        if (keyCollection) {
+          const rawValue = keyCollection[columnArrays[1]];
+          const formattedValue = FormatCsvCellValue(rawValue, delimiterChar);
+          dataCells.push(formattedValue);
+        }
+      } else {
+        // *************** Extract values for each column in order
+        const columnName = columns[colIndex];
+        const rawValue = record[columnName];
+        const formattedValue = FormatCsvCellValue(rawValue, delimiterChar);
+        dataCells.push(formattedValue);
+      }
     }
 
     // *************** Join cells with delimiter to form row

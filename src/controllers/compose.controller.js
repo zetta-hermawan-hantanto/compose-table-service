@@ -36,6 +36,11 @@ async function GetAiTableById(req, res) {
       throw new Error('Table not found');
     }
 
+    // *************** Enforce ownership check to prevent unauthorized access
+    if (req.userId && tableData.created_by && tableData.created_by.toString() !== req.userId.toString()) {
+      return res.status(404).json({ error: 'Table not found' });
+    }
+
     // *************** Query rows by dynamic_table_id with limit for preview
     const rowsData = await DynamicRowTableModel.find({
       dynamic_table_id: tableId,

@@ -4,6 +4,7 @@ const path = require('path');
 
 // *************** IMPORT UTILITIES ***************
 const { GetExportFailureMessage } = require('../utils/export.messages');
+const { ValidateFieldPath, CountJoinsInContract, EnforceJoinLimit } = require('../utils/path.validator');
 
 // *************** LOAD CATALOG ***************
 const catalogPath = path.join(__dirname, '../shared/catalog/schema.catalog.json');
@@ -18,6 +19,7 @@ const VALID_OPERATORS = ['eq', 'ne', 'in', 'contains', 'gte', 'lte'];
  * GetValidColumnNames extracts all valid column names from students catalog.
  * Used for column validation and suggestion generation.
  * Returns array of field names that can be used in exports.
+ * V4: Also includes joined entity field examples.
  * @returns {Array<string>} - List of valid column names from catalog.
  */
 function GetValidColumnNames() {
@@ -36,6 +38,7 @@ function GetValidColumnNames() {
  * ValidateColumns checks if requested columns exist in students catalog.
  * Identifies unknown columns and suggests valid alternatives.
  * Returns validation result with clarification message if needed.
+ * V4: Supports entity.field notation for joined entities.
  * @param {Array<string>} columns - Requested column names from user prompt.
  * @param {string} lang - Language for error messages.
  * @returns {object} - Validation result with isValid and optional clarification.
@@ -66,21 +69,30 @@ function ValidateColumns(columns, lang) {
     };
   }
 
-  // *************** Get valid column names from catalog
-  const validColumns = GetValidColumnNames();
-
-  // *************** Identify unknown columns
+  // *************** Validate each column using v4 path validator
   const unknownColumns = [];
   for (let i = 0; i < columns.length; i++) {
     const columnName = columns[i];
-    if (!validColumns.includes(columnName)) {
-      unknownColumns.push(columnName);
+
+    // *************** Check if column contains dot notation for v4 joins
+    if (columnName.includes('.')) {
+      try {
+        ValidateFieldPath(columnName, catalogData);
+      } catch (error) {
+        unknownColumns.push(columnName);
+      }
+    } else {
+      // *************** Check v3 students field
+      const fieldExists = studentsFields.some((f) => f.name === columnName);
+      if (!fieldExists) {
+        unknownColumns.push(columnName);
+      }
     }
   }
 
   // *************** Return clarification if unknown columns found
   if (unknownColumns.length > 0) {
-    const validExamples = validColumns.slice(0, 5);
+    const validExamples = GetValidColumnNames().slice(0, 8);
     const clarificationMessage = GetExportFailureMessage('unknown_columns', lang, {
       unknownColumns: unknownColumns,
       validExamples: validExamples,
@@ -103,6 +115,7 @@ function ValidateColumns(columns, lang) {
  * ValidateFilters checks if filter fields and operators are valid.
  * Verifies field names exist in catalog and operators are supported.
  * Returns validation result with failure message if invalid.
+ * V4: Supports entity.field notation for joined entity filters.
  * @param {Array} filters - Array of filter objects with key op and value.
  * @param {string} lang - Language for error messages.
  * @returns {object} - Validation result with isValid and optional failure.
@@ -123,25 +136,37 @@ function ValidateFilters(filters, lang) {
     };
   }
 
-  // *************** Get valid field names from catalog
-  const validFields = GetValidColumnNames();
-
   // *************** Validate each filter
   for (let i = 0; i < filters.length; i++) {
     const filter = filters[i];
+    const filterKey = filter.key;
 
-    // *************** Extract field name from students.field_name format
-    let fieldName = filter.key;
-    if (fieldName && fieldName.startsWith('students.')) {
-      fieldName = fieldName.replace('students.', '');
-    }
+    // *************** Validate filter key using v4 path validator
+    try {
+      if (filterKey.includes('.')) {
+        // *************** V4 path like school.city or students.status
+        ValidateFieldPath(filterKey, catalogData);
+      } else {
+        // *************** V3 path assume students entity
+        const fieldExists = studentsFields.some((f) => f.name === filterKey);
+        if (!fieldExists) {
+          const validExamples = GetValidColumnNames().slice(0, 5).join(', ');
+          const failureMessage = GetExportFailureMessage('invalid_filter', lang, {
+            fieldName: filterKey,
+            suggestions: `Try one of: ${validExamples}`,
+          });
 
-    // *************** Check if field exists in catalog
-    if (!validFields.includes(fieldName)) {
-      const suggestions = validFields.slice(0, 5).join(', ');
+          return {
+            isValid: false,
+            failure: failureMessage,
+          };
+        }
+      }
+    } catch (error) {
+      const validExamples = GetValidColumnNames().slice(0, 5).join(', ');
       const failureMessage = GetExportFailureMessage('invalid_filter', lang, {
-        fieldName: fieldName,
-        suggestions: `Try one of: ${suggestions}`,
+        fieldName: filterKey,
+        suggestions: `Try one of: ${validExamples}`,
       });
 
       return {
@@ -153,7 +178,7 @@ function ValidateFilters(filters, lang) {
     // *************** Check if operator is valid
     if (!VALID_OPERATORS.includes(filter.op)) {
       const failureMessage = GetExportFailureMessage('invalid_filter', lang, {
-        fieldName: fieldName,
+        fieldName: filterKey,
         suggestions: `Valid operators: ${VALID_OPERATORS.join(', ')}`,
       });
 
@@ -234,6 +259,7 @@ function ValidateLanguage(lang) {
  * ValidateExportRequest validates complete export request parameters.
  * Checks columns filters delimiter and language against catalog rules.
  * Returns normalized export config or clarification or failure envelope.
+ * V4: Enforces max 3 joined entities per export.
  * @param {object} params - Export request parameters.
  * @param {Array<string>} params.columns - Requested column names.
  * @param {Array} params.filters - Optional filter conditions.
@@ -273,6 +299,22 @@ function ValidateExportRequest({ columns, filters, delimiter, lang }) {
       isValid: false,
       failed: true,
       failureMessage: filtersResult.failure,
+    };
+  }
+
+  // *************** Enforce v4 join limit max 3 entities
+  const joinCount = CountJoinsInContract({
+    columns: columns.map((col) => ({ source: { field: col } })),
+    filters: filters || [],
+  });
+
+  try {
+    EnforceJoinLimit(joinCount);
+  } catch (error) {
+    return {
+      isValid: false,
+      failed: true,
+      failureMessage: error.message,
     };
   }
 

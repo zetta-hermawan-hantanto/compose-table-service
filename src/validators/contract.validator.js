@@ -262,7 +262,7 @@ async function ValidateStudentsContract(contract, catalog, createdByUserId) {
 
       if (column.source.collection !== 'students') {
         throw new Error(`Column ${i} source.collection must be students`);
-      }
+      } 
 
       if (!column.source.field) {
         throw new Error(`Column ${i} missing source.field`);

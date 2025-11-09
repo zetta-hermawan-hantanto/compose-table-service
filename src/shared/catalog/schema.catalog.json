@@ -1,5 +1,5 @@
 {
-  "version": "2025-11-08",
+  "version": "2025-11-09",
   "entities": [
     {
       "name": "students",
@@ -29,10 +29,62 @@
         { "name": "updatedAt", "type": "date" }
       ],
       "safe_preview_fields": ["first_name","last_name","email","status","student_title_status"]
+    },
+    {
+      "name": "rncp_title",
+      "title": "RNCP Title",
+      "description": "RNCP certification titles",
+      "primary_key": "_id",
+      "fields": [
+        { "name": "short_name", "type": "string" },
+        { "name": "long_name", "type": "string" },
+        { "name": "rncp_code", "type": "string" },
+        { "name": "rncp_level", "type": "string" },
+        { "name": "status", "type": "string" },
+        { "name": "year_of_certification", "type": "number" }
+      ],
+      "safe_preview_fields": ["short_name","rncp_code","rncp_level","status"]
+    },
+    {
+      "name": "school",
+      "title": "School",
+      "description": "Educational institutions",
+      "primary_key": "_id",
+      "fields": [
+        { "name": "short_name", "type": "string" },
+        { "name": "long_name", "type": "string" },
+        { "name": "status", "type": "string" },
+        { "name": "school_siret", "type": "string" },
+        { "name": "city", "type": "string", "computed": "from school_address where is_main_address=true" },
+        { "name": "country", "type": "string", "computed": "from school_address where is_main_address=true" }
+      ],
+      "safe_preview_fields": ["short_name","city","country"]
+    },
+    {
+      "name": "class",
+      "title": "Class",
+      "description": "Student class groups",
+      "primary_key": "_id",
+      "fields": [
+        { "name": "name", "type": "string" },
+        { "name": "status", "type": "string" },
+        { "name": "year_of_certification", "type": "number" },
+        { "name": "type_evaluation", "type": "string" },
+        { "name": "evaluation_step", "type": "string" },
+        { "name": "class_active", "type": "boolean" }
+      ],
+      "safe_preview_fields": ["name","year_of_certification","status"]
     }
+  ],
+  "relations": [
+    { "from": "students.rncp_title", "to": "rncp_title._id", "type": "one_to_one" },
+    { "from": "students.school", "to": "school._id", "type": "one_to_one" },
+    { "from": "students.current_class", "to": "class._id", "type": "one_to_one" }
   ],
   "constraints": {
     "max_columns_per_table": 30,
-    "max_filters_per_request": 10
+    "max_filters_per_request": 10,
+    "max_joins_per_request": 3,
+    "max_row_cap": 10000
   }
 }

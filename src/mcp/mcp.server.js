@@ -4,9 +4,10 @@ const path = require('path');
 const mongoose = require('mongoose');
 
 /**
- * LoadStudentsCatalog reads the schema catalog JSON file and extracts students entity metadata.
+ * LoadStudentsCatalog reads the schema catalog JSON file and extracts all entity metadata for v4.
  * This function is used to provide field information to the AI agent for building contracts.
- * @returns {object} - Object containing base_entity and fields array from catalog.
+ * V4: Returns students base entity plus joinable entities (rncp_title school class).
+ * @returns {object} - Object containing base_entity entities array relations and constraints.
  * @throws {Error} - If catalog file cannot be read or parsed.
  */
 function LoadStudentsCatalog() {
@@ -17,42 +18,46 @@ function LoadStudentsCatalog() {
   const catalogRaw = fs.readFileSync(catalogPath, 'utf8');
   const catalog = JSON.parse(catalogRaw);
 
-  // *************** Find students entity in catalog
-  const studentsEntity = catalog.entities.find((entity) => entity.name === 'students');
+  // *************** Format all entities for AI consumption
+  const entitiesFormatted = catalog.entities.map((entity) => {
+    const entityData = {
+      name: entity.name,
+      fields: entity.fields.map((field) => {
+        const fieldData = {
+          key: field.name,
+          label: field.name,
+          data_type: field.type,
+        };
 
-  if (!studentsEntity) {
-    throw new Error('Students entity not found in catalog');
-  }
+        if (field.enum) {
+          fieldData.enum = field.enum;
+        }
 
-  // *************** Map catalog fields to simplified format for AI consumption
-  const fieldsFormatted = studentsEntity.fields.map((field) => {
-    const fieldData = {
-      key: field.name,
-      label: field.name,
-      data_type: field.type,
+        return fieldData;
+      }),
     };
 
-    if (field.enum) {
-      fieldData.enum = field.enum;
-    }
-
-    return fieldData;
+    return entityData;
   });
 
-  // *************** Construct metadata response
+  // *************** Construct v4 metadata response with all entities
   const metadataResult = {
+    version: catalog.version || '2025-11-09',
     base_entity: 'students',
-    fields: fieldsFormatted,
+    entities: entitiesFormatted,
+    relations: catalog.relations || [],
+    constraints: catalog.constraints || {},
   };
 
   return metadataResult;
 }
 
 /**
- * SearchCatalogFields performs case-insensitive search over students catalog fields.
+ * SearchCatalogFields performs case-insensitive search over all catalog fields from all entities.
  * Used by AI agent when field names are ambiguous or need clarification.
+ * V4: Searches across students rncp_title school and class entities.
  * @param {string} query - Search term to match against field keys and labels.
- * @returns {object} - Object containing matching fields array.
+ * @returns {object} - Object containing matching fields array with entity prefix.
  * @throws {Error} - If query is missing or invalid.
  */
 function SearchCatalogFields(query) {
@@ -65,23 +70,43 @@ function SearchCatalogFields(query) {
     throw new Error('Search query must be a string');
   }
 
-  // *************** Load catalog metadata
+  // *************** Load v4 catalog metadata
   const catalogMetadata = LoadStudentsCatalog();
 
   // *************** Normalize query for case-insensitive search
   const queryLower = query.toLowerCase();
 
-  // *************** Filter fields matching query in key or label
-  const matchingFields = catalogMetadata.fields.filter((field) => {
-    const keyMatch = field.key.toLowerCase().includes(queryLower);
-    const labelMatch = field.label.toLowerCase().includes(queryLower);
-    return keyMatch || labelMatch;
-  });
+  // *************** Search across all entities
+  const matchingFields = [];
+
+  for (let i = 0; i < catalogMetadata.entities.length; i++) {
+    const entity = catalogMetadata.entities[i];
+
+    for (let j = 0; j < entity.fields.length; j++) {
+      const field = entity.fields[j];
+      const keyMatch = field.key.toLowerCase().includes(queryLower);
+      const labelMatch = field.label.toLowerCase().includes(queryLower);
+
+      if (keyMatch || labelMatch) {
+        // *************** Add entity prefix for joined fields
+        const fieldPath = entity.name === 'students' ? field.key : `${entity.name}.${field.key}`;
+
+        matchingFields.push({
+          entity: entity.name,
+          field_path: fieldPath,
+          key: field.key,
+          label: field.label,
+          data_type: field.data_type,
+        });
+      }
+    }
+  }
 
   // *************** Construct search result
   const searchResult = {
     query: query,
     matches: matchingFields,
+    total_matches: matchingFields.length,
   };
 
   return searchResult;
@@ -171,7 +196,7 @@ function CreateMcpServer() {
   const toolsRegistry = {
     'db_introspect_students': {
       name: 'db_introspect_students',
-      description: 'Returns metadata about students entity including all available fields',
+      description: 'Returns v4 catalog metadata including students base entity and joinable entities (rncp_title school class). Use entity.field notation for joins (e.g. school.city rncp_title.rncp_level).',
       parameters: {},
       handler: function IntrospectStudentsHandler() {
         return LoadStudentsCatalog();
@@ -179,7 +204,7 @@ function CreateMcpServer() {
     },
     'db_search_fields': {
       name: 'db_search_fields',
-      description: 'Search for fields in students catalog by keyword',
+      description: 'Search for fields across all entities (students rncp_title school class) by keyword. Returns field_path with entity prefix for joins.',
       parameters: {
         query: {
           type: 'string',

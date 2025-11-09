@@ -12,6 +12,8 @@ const { BuildCsvFromRows } = require('../utils/csv.builder');
 const { UploadCsvToS3 } = require('../utils/s3.uploader');
 const { SendExportEmail } = require('../utils/email');
 const { GetExportSuccessMessage, GetExportFailureMessage } = require('../utils/export.messages');
+const { BuildStudentAggregation, DetectRequiredJoins } = require('../utils/aggregation.builder');
+const { ParseFieldPath } = require('../utils/path.validator');
 
 /**
  * ProcessExportTurn handles CSV export request from chat conversation.
@@ -101,18 +103,50 @@ async function ProcessExportTurn({ user_id, conversation_id, export_config, lang
     const validatedFilters = validatedConfig.filters;
     const validatedDelimiter = validatedConfig.delimiter;
 
-    // *************** Build MongoDB filter from validated filters
-    const mongoFilter = BuildMongoFilter(validatedFilters);
+    // *************** Build column objects for join detection
+    const columnObjects = validatedColumns.map((colName) => ({
+      key: colName,
+      source: { field: colName },
+    }));
 
-    // *************** Query students collection with filter and projection
-    const projection = {};
-    for (let i = 0; i < validatedColumns.length; i++) {
-      const columnName = validatedColumns[i];
-      projection[columnName] = 1;
+    // *************** Detect if joins are required for v4
+    const requiredJoins = DetectRequiredJoins({
+      columns: columnObjects,
+      filters: validatedFilters,
+    });
+
+    let studentRecords;
+
+    if (requiredJoins.size > 0) {
+      // *************** v4 export with joins use aggregation pipeline
+      const pipeline = BuildStudentAggregation({
+        columns: columnObjects,
+        filters: validatedFilters,
+        sort: null,
+      });
+
+      // *************** Execute aggregation query
+      studentRecords = await StudentModel.aggregate(pipeline);
+    } else {
+      // *************** v3 export students-only use direct query
+      const mongoFilter = BuildMongoFilter(validatedFilters);
+
+      // *************** Build projection from validated columns
+      const projection = {};
+      for (let i = 0; i < validatedColumns.length; i++) {
+        const columnName = validatedColumns[i];
+        // *************** Extract field name from path if needed
+        const parsed = ParseFieldPath(columnName);
+        if (parsed.field) {
+          projection[parsed.field] = 1;
+        } else {
+          projection[columnName] = 1;
+        }
+      }
+
+      // *************** Execute query with lean for performance
+      studentRecords = await StudentModel.find(mongoFilter).select(projection).lean();
     }
-
-    // *************** Execute query with lean for performance
-    const studentRecords = await StudentModel.find(mongoFilter).select(projection).lean();
 
     // *************** Build CSV content from query results
     const csvContent = BuildCsvFromRows({

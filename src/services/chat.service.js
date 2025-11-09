@@ -8,8 +8,10 @@ const { CreateMcpClient } = require('../mcp/mcp.client');
 const { GetBilipV2SystemPrompt } = require('../ai/bilip_v2.system.prompt');
 const { CallAIWithEnvelope } = require('../utils/ai.reasoner');
 const { BuildMongoFilter, BuildProjection, BuildSort } = require('../utils/query.builders');
-const { EstimateRowCount } = require('../utils/row.estimator');
+const { EstimateRowCount, EnforceRowCap } = require('../utils/row.estimator');
 const { ProcessExportTurn } = require('./export.service');
+const { BuildStudentAggregation, DetectRequiredJoins } = require('../utils/aggregation.builder');
+const { CountJoinsInContract, EnforceJoinLimit } = require('../utils/path.validator');
 
 // *************** IMPORT MODULES ***************
 const StudentModel = require('../models/student.model');
@@ -57,11 +59,11 @@ function ResolveStudentValue(studentDoc, columnDef) {
   }
 
   // *************** Access direct field from student document
-  const fieldName = columnDef.source.field;
+  const fieldName = columnDef.key;
   const fieldValue = studentDoc[fieldName];
 
   // *************** Return null if field is missing or undefined
-  if (fieldValue === undefined || fieldValue === null) {
+  if (fieldValue === undefined || fieldValue  === null) {
     return null;
   }
 
@@ -71,10 +73,11 @@ function ResolveStudentValue(studentDoc, columnDef) {
 /**
  * RebuildTableRows deletes existing rows and rebuilds from current table configuration.
  * Triggers on any change to columns filters or sort in modify operations.
- * Enforces 5000 row guard after rebuild to maintain demo environment performance.
+ * Supports v4 joined queries using aggregation pipeline when needed.
+ * Enforces v4 10000 row cap to maintain performance.
  * @param {object} table - Dynamic table document with current configuration.
  * @returns {Promise<number>} - Promise resolving to number of rows inserted.
- * @throws {Error} - If row count exceeds 5000 or query fails.
+ * @throws {Error} - If row count exceeds cap or query fails.
  */
 async function RebuildTableRows(table) {
   // *************** Delete existing rows for this table
@@ -82,17 +85,36 @@ async function RebuildTableRows(table) {
     dynamic_table_id: table._id,
   });
 
-  // *************** Build query components from table configuration
-  const mongoFilter = BuildMongoFilter(table.filters);
-  const projection = BuildProjection(table.columns);
-  const sortConfig = BuildSort(table.sort);
+  // *************** Detect if joins are required for v4
+  const requiredJoins = DetectRequiredJoins({
+    columns: table.columns,
+    filters: table.filters,
+    sort: table.sort,
+  });
 
-  // *************** Query students with filter projection and sort
-  const studentDocs = await StudentModel
-    .find(mongoFilter)
-    .select(projection)
-    .sort(sortConfig)
-    .lean();
+  let studentDocs;
+
+  if (requiredJoins.size > 0) {
+    // *************** v4 path with joins use aggregation pipeline
+    const pipeline = BuildStudentAggregation({
+      columns: table.columns,
+      filters: table.filters,
+      sort: table.sort,
+    });
+
+    studentDocs = await StudentModel.aggregate(pipeline);
+  } else {
+    // *************** v3 path students-only use direct query
+    const mongoFilter = BuildMongoFilter(table.filters);
+    const projection = BuildProjection(table.columns);
+    const sortConfig = BuildSort(table.sort);
+
+    studentDocs = await StudentModel
+      .find(mongoFilter)
+      .select(projection)
+      .sort(sortConfig)
+      .lean();
+  }
 
   // *************** Transform student documents to row data
   const rowsToInsert = studentDocs.map((doc) => {
@@ -140,12 +162,27 @@ function LoadCatalogMetadata() {
   }
 
   // *************** Map catalog fields to validation format
-  const fieldsFormatted = studentsEntity.fields.map((field) => ({
-    key: field.name,
-    label: field.name,
-    data_type: field.type,
-    enum: field.enum || undefined,
-  }));
+  const fieldsFormatted = [];
+
+  catalog.entities.forEach((entity) => {
+    if (entity.name === 'students') {
+      const entityFields = entity.fields.map((field) => ({
+        key: field.name,
+        label: field.name,
+        data_type: field.type,
+        enum: field.enum || null,
+      }));
+      fieldsFormatted.push(...entityFields);
+    } else {
+      const entityFields = entity.fields.map((field) => ({
+        key: `${entity.name}.${field.name}`,
+        label: `${entity.name}.${field.name}`,
+        data_type: field.type,
+        enum: field.enum || null,
+      }));
+      fieldsFormatted.push(...entityFields);
+    }
+  });
 
   return {
     base_entity: 'students',
@@ -246,20 +283,61 @@ async function ProcessChatTurn(params) {
         params.user_id
       );
 
-      // *************** Estimate row count for guard check
-      const estimatedCount = await EstimateRowCount(validatedContract.filters, StudentModel);
+      // *************** v4 Validate join limit if joins are present
+      const joinAnalysis = CountJoinsInContract(validatedContract);
+      if (joinAnalysis.joinCount > 0) {
+        const joinLimitCheck = EnforceJoinLimit(joinAnalysis.joinCount);
+        if (!joinLimitCheck.isValid) {
+          throw new Error(joinLimitCheck.error);
+        }
+      }
 
-      // *************** Build MongoDB query components
-      const mongoFilter = BuildMongoFilter(validatedContract.filters);
-      const projection = BuildProjection(validatedContract.columns);
-      const sortConfig = BuildSort(validatedContract.sort);
+      // *************** Detect if joins are required for v4
+      const requiredJoins = DetectRequiredJoins(validatedContract);
 
-      // *************** Query students collection
-      const studentDocs = await StudentModel
-        .find(mongoFilter)
-        .select(projection)
-        .sort(sortConfig)
-        .lean();
+      // *************** Build query based on join requirement
+      let studentDocs;
+      let estimatedCount;
+
+      if (requiredJoins.size > 0) {
+        // *************** v4 path with joins use aggregation pipeline
+        const pipeline = BuildStudentAggregation({
+          columns: validatedContract.columns,
+          filters: validatedContract.filters,
+          sort: validatedContract.sort,
+        });
+
+        // *************** Estimate row count with aggregation
+        estimatedCount = await EstimateRowCount(pipeline, StudentModel, true);
+
+        // *************** Enforce v4 10k row cap
+        const rowCapCheck = EnforceRowCap(estimatedCount);
+        if (!rowCapCheck.isValid) {
+          throw new Error(rowCapCheck.error);
+        }
+
+        // *************** Execute aggregation query
+        studentDocs = await StudentModel.aggregate(pipeline);
+      } else {
+        // *************** v3 path students-only use direct query
+        estimatedCount = await EstimateRowCount(validatedContract.filters, StudentModel, false);
+
+        // *************** Enforce v4 10k row cap (backward compatible)
+        const rowCapCheck = EnforceRowCap(estimatedCount);
+        if (!rowCapCheck.isValid) {
+          throw new Error(rowCapCheck.error);
+        }
+
+        const mongoFilter = BuildMongoFilter(validatedContract.filters);
+        const projection = BuildProjection(validatedContract.columns);
+        const sortConfig = BuildSort(validatedContract.sort);
+
+        studentDocs = await StudentModel
+          .find(mongoFilter)
+          .select(projection)
+          .sort(sortConfig)
+          .lean();
+      }
 
       // *************** Transform student documents to row data
       const rowsToInsert = studentDocs.map((doc) => {
