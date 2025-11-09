@@ -6,6 +6,100 @@ const ErrorLogModel = require('../models/error_log.model');
 const { ProcessChatTurn } = require('../services/chat.service');
 
 /**
+ * GetErrorMessage returns human-readable error message based on error type and language.
+ * Translates technical errors into user-friendly messages without exposing internals.
+ * Supports English and French languages for consistent user experience.
+ * @param {Error} error - Error object from caught exception.
+ * @param {string} lang - Language code en or fr.
+ * @returns {object} - Object with message explanation and options array.
+ */
+function GetErrorMessage(error, lang) {
+  // *************** Default to English if lang not specified
+  const effectiveLang = lang === 'fr' ? 'fr' : 'en';
+
+  // *************** Extract error message for pattern matching
+  const errorMessage = error.message || '';
+
+  // *************** Handle missing prompt error
+  if (errorMessage.includes('Missing prompt') || errorMessage.includes('prompt')) {
+    if (effectiveLang === 'fr') {
+      return {
+        message: 'Veuillez fournir une question ou une instruction.',
+        explanation: 'Le message ne peut pas être vide.',
+        options: ['Posez une question sur les étudiants', 'Demandez de créer ou modifier une table'],
+      };
+    }
+    return {
+      message: 'Please provide a question or instruction.',
+      explanation: 'Your message cannot be empty.',
+      options: ['Ask a question about students', 'Request to create or modify a table'],
+    };
+  }
+
+  // *************** Handle missing user_id error
+  if (errorMessage.includes('Missing user_id') || errorMessage.includes('user_id')) {
+    if (effectiveLang === 'fr') {
+      return {
+        message: 'Authentification requise.',
+        explanation: 'Veuillez vous connecter pour continuer.',
+        options: ['Connectez-vous à nouveau'],
+      };
+    }
+    return {
+      message: 'Authentication required.',
+      explanation: 'Please log in to continue.',
+      options: ['Log in again'],
+    };
+  }
+
+  // *************** Handle conversation not found error
+  if (errorMessage.includes('Conversation not found')) {
+    if (effectiveLang === 'fr') {
+      return {
+        message: 'Cette conversation n\'existe plus.',
+        explanation: 'La conversation a peut-être été supprimée ou l\'ID est incorrect.',
+        options: ['Commencer une nouvelle conversation'],
+      };
+    }
+    return {
+      message: 'This conversation no longer exists.',
+      explanation: 'The conversation may have been deleted or the ID is incorrect.',
+      options: ['Start a new conversation'],
+    };
+  }
+
+  // *************** Handle database connection errors
+  if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('connection')) {
+    if (effectiveLang === 'fr') {
+      return {
+        message: 'Service temporairement indisponible.',
+        explanation: 'Nous rencontrons des difficultés techniques.',
+        options: ['Réessayez dans quelques instants'],
+      };
+    }
+    return {
+      message: 'Service temporarily unavailable.',
+      explanation: 'We are experiencing technical difficulties.',
+      options: ['Try again in a few moments'],
+    };
+  }
+
+  // *************** Default generic error for unknown cases
+  if (effectiveLang === 'fr') {
+    return {
+      message: 'Une erreur s\'est produite lors du traitement de votre demande.',
+      explanation: 'Veuillez reformuler votre demande ou réessayer.',
+      options: ['Réessayez', 'Reformulez votre question avec plus de détails'],
+    };
+  }
+  return {
+    message: 'An error occurred while processing your request.',
+    explanation: 'Please rephrase your request or try again.',
+    options: ['Try again', 'Rephrase your question with more details'],
+  };
+}
+
+/**
  * HandleChatTurn processes a single conversational turn for table operations.
  * Manages session creation and persistence across conversation flow.
  * Follows WARP validation query transformation output flow.
@@ -106,6 +200,9 @@ async function HandleChatTurn(req, res) {
 
     return res.status(200).json(outputEnvelope);
   } catch (error) {
+    // *************** Extract language for error messages
+    const errorLang = (req.body && req.body.lang) || 'en';
+
     // *************** Log error to database with request context
     await ErrorLogModel.create({
       path: 'controllers/chat.controller.js',
@@ -114,14 +211,17 @@ async function HandleChatTurn(req, res) {
       error: String(error.stack),
     });
 
+    // *************** Get human-readable error message
+    const errorDetails = GetErrorMessage(error, errorLang);
+
     // *************** Construct Failure envelope for error response
     const failureEnvelope = {
       status: 'failed',
       conversation_id: req.body.conversation_id || null,
       table_id: req.body.table_id || null,
-      messages: [{ role: 'assistant', message: 'An error occurred processing your request.' }],
-      explanation: error.message,
-      options: ['Please try again', 'Rephrase your request with more details'],
+      messages: [{ role: 'assistant', message: errorDetails.message }],
+      explanation: errorDetails.explanation,
+      options: errorDetails.options,
     };
 
     return res.status(500).json(failureEnvelope);
@@ -179,6 +279,9 @@ async function GetChatHistory(req, res) {
 
     return res.status(200).json(outputResponse);
   } catch (error) {
+    // *************** Extract language for error messages default to en
+    const errorLang = 'en';
+
     // *************** Log error to database with request context
     await ErrorLogModel.create({
       path: 'controllers/chat.controller.js',
@@ -187,7 +290,15 @@ async function GetChatHistory(req, res) {
       error: String(error.stack),
     });
 
-    return res.status(500).json({ error: error.message });
+    // *************** Get human-readable error message
+    const errorDetails = GetErrorMessage(error, errorLang);
+
+    // *************** Return structured error response
+    return res.status(500).json({
+      error: errorDetails.message,
+      details: errorDetails.explanation,
+      suggestions: errorDetails.options,
+    });
   }
 }
 

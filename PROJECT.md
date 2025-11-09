@@ -137,7 +137,6 @@ Used for validation issues, guards, or unexpected runtime problems.
 - Reject if estimated rows > 5000; return failure envelope with explanation and options to narrow.
 - Create path reuses `ValidateStudentsContract`; modify path forces arrays for `columns`/`filters` payloads when present and ensures sort.dir ∈ {asc, desc} plus sort.key exists in catalog or current columns.
 - Filters must start with `students.` and align with the catalog data types; `contains` maps to case-insensitive regex, `in` expects arrays.
-- Row guard runs via `EstimateRowCount` before row inserts; modify validator also checks computed column conflicts and impossible updates.
 
 ## Error Protocol
 - Controllers, services, and validators wrap logic in try/catch blocks; each catch logs `{ path, parameter_input, function_name, error }` into ErrorLog before responding.
