@@ -9,6 +9,7 @@ const { GetBilipV2SystemPrompt } = require('../ai/bilip_v2.system.prompt');
 const { CallAIWithEnvelope } = require('../utils/ai.reasoner');
 const { BuildMongoFilter, BuildProjection, BuildSort } = require('../utils/query.builders');
 const { EstimateRowCount } = require('../utils/row.estimator');
+const { ProcessExportTurn } = require('./export.service');
 
 // *************** IMPORT MODULES ***************
 const StudentModel = require('../models/student.model');
@@ -157,12 +158,13 @@ function LoadCatalogMetadata() {
 /**
  * ProcessChatTurn orchestrates complete conversational turn for table operations.
  * Coordinates AI reasoning validation query execution and envelope construction.
- * Branches by AI status to handle clarification failure create and modify intents.
+ * Branches by AI status to handle clarification failure create modify and export intents.
  * Implements Phase F row rebuild and Phase G error protocol throughout.
- * @param {object} params - Parameters object with prompt session and user_id.
+ * @param {object} params - Parameters object with prompt session user_id and lang.
  * @param {string} params.messages - Array of message objects in the conversation.
  * @param {object} params.session - Session chat document with conversation history.
  * @param {string} params.user_id - User ID for table creation and validation.
+ * @param {string} params.lang - Language code en or fr for export messages.
  * @returns {Promise<object>} - Promise resolving to envelope object with messages array.
  * @throws {Error} - On critical failures after logging to ErrorLogModel.
  */
@@ -315,6 +317,24 @@ async function ProcessChatTurn(params) {
       };
 
       return successCreateEnvelope;
+    }
+
+    if (aiEnvelope.status === 'ready' && aiEnvelope.intent === 'export_table') {
+      // *************** HANDLE EXPORT PATH
+
+      // *************** Extract language from params or default to en
+      const lang = params.lang || 'en';
+
+      // *************** Call export service with validated config
+      const exportEnvelope = await ProcessExportTurn({
+        user_id: params.user_id,
+        conversation_id: params.session._id ? String(params.session._id) : null,
+        export_config: aiEnvelope.export_config,
+        lang: lang,
+        StudentModel: StudentModel,
+      });
+
+      return exportEnvelope;
     }
 
     if (aiEnvelope.status === 'ready' && aiEnvelope.intent === 'modify_table') {

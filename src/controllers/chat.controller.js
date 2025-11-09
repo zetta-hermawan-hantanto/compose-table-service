@@ -9,7 +9,7 @@ const { ProcessChatTurn } = require('../services/chat.service');
  * HandleChatTurn processes a single conversational turn for table operations.
  * Manages session creation and persistence across conversation flow.
  * Follows WARP validation query transformation output flow.
- * @param {object} req - Express request object with body containing prompt user_id conversation_id and table_id.
+ * @param {object} req - Express request object with body containing prompt user_id conversation_id table_id and lang.
  * @param {object} res - Express response object for sending envelope response.
  * @returns {Promise<void>} - Promise resolving when response is sent.
  * @throws {Error} - On validation or processing errors with Failure envelope.
@@ -30,11 +30,6 @@ async function HandleChatTurn(req, res) {
       throw new Error('Missing prompt');
     }
 
-    // *************** Validate lang parameter
-    if (['fr', 'en'].includes(req.body.lang)) {
-      throw new Error('Unsupported language for chat service');
-    }
-
     // *************** Validate user_id parameter
     const userId = req.userId;
 
@@ -44,7 +39,10 @@ async function HandleChatTurn(req, res) {
     }
 
     // *************** Extract parameters from request body
-    const { prompt, conversation_id, table_id } = req.body;
+    const { prompt, conversation_id, table_id, lang } = req.body;
+
+    // *************** Validate and default lang parameter
+    const effectiveLang = (lang === 'fr' || lang === 'en') ? lang : 'en';
 
     // *************** Load or create session based on conversation_id
     let session;
@@ -78,6 +76,7 @@ async function HandleChatTurn(req, res) {
       messages: session.messages,
       session: session,
       user_id: userId,
+      lang: effectiveLang,
     });
 
     // *************** Extract AI message from service result
