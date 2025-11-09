@@ -108,7 +108,7 @@ async function SendExportEmail({ userId, csvResultString, fileUrl, lang }) {
     });
 
     const mailOptions = {
-      from: 'noreply@example.com',
+      from: process.env.EMAIL_FROM,
       to: user.email,
       subject: subject,
       html: emailHtml,
