@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 // *************** IMPORT MODULES ***************
 const UserModel = require('../models/user.model');
 const ErrorLogModel = require('../models/error_log.model');
+const MailModel = require('../models/mail.model');
 
 // *************** IMPORT SERVICES ***************
 const { sendMail } = require('../services/amazon.service');
@@ -114,10 +115,26 @@ async function SendExportEmail({ userId, csvResultString, fileUrl, lang }) {
       html: emailHtml,
     };
 
-    // TODO: Create MailModel entry for tracking sent emails
-
     // *************** Send email using Amazon SES service
-    sendMail(mailOptions);
+    await sendMail(mailOptions);
+
+    await MailModel.create({
+      is_sent: true,
+      sender_property: {
+        mail_type: 'sent',
+        sender: process.env.SYSTEM_SENDER_ID,
+      },
+      recipient_properties: [
+        {
+          recipients: [user._id],
+          recipients_email: [user.email],
+          rank: 'a',
+        },
+      ],
+      subject: subject,
+      message: emailHtml,
+      date: new Date(),
+    });
   } catch (error) {
     await ErrorLogModel.create({
       name_function: 'SendExportEmail',
