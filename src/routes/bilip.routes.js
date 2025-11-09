@@ -2,7 +2,7 @@
 const express = require('express');
 
 // *************** IMPORT MODULE ***************
-const { GetAiTableById, GetAllAiTables } = require('../controllers/compose.controller');
+const { GetAiTableById, GetAllAiTables, UpdateAITable, DeleteAIStudentTable, ExportManualAITable } = require('../controllers/compose.controller');
 const { HandleChatTurn, GetChatHistory } = require('../controllers/chat.controller');
 
 // *************** Initialize router instance
@@ -19,6 +19,15 @@ router.post('/bilip/chat', HandleChatTurn);
 
 // *************** Define GET endpoint for chat history retrieval
 router.get('/bilip/chat/:conversation_id', GetChatHistory);
+
+// *************** Define additional routes as needed
+router.put('/ai-tables/:id', UpdateAITable);
+
+// *************** Define DELETE endpoint for AI student table deletion
+router.delete('/ai-tables/:id', DeleteAIStudentTable);
+
+// *************** Define POST endpoint for manual AI table export
+router.post('/ai-tables/:id/export', ExportManualAITable);
 
 // *************** EXPORT MODULE ***************
 module.exports = router;
