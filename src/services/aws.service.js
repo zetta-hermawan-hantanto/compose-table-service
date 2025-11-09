@@ -67,7 +67,7 @@ async function UploadFileToS3Service({ file }) {
     return fileUploadedResult;
   } catch (error) {
     // *************** Log error to ErrorLogModel for debugging
-    ErrorLogModel.create({
+    await ErrorLogModel.create({
       name_function: 'UploadFileToS3Service',
       parameter_input: JSON.stringify({
         file: file
