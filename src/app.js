@@ -13,7 +13,7 @@ const app = express();
 
 // *************** Configure global middleware
 const corsOptions = {
-  origin: ['http://localhost:4200'],                      
+  origin: ['http://localhost:4200', 'https://upgrade.zetta-demo.space'],                      
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   credentials: true,
   maxAge: 86400,
