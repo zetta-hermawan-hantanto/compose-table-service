@@ -1,6 +1,8 @@
 // *************** IMPORT LIBRARY ***************
 const { S3, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { randomUUID } = require('crypto');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const { GetObjectCommand } = require('@aws-sdk/client-s3');
 
 // *************** IMPORT MODULES ***************
 const ErrorLogModel = require('../models/error_log.model');
@@ -52,11 +54,13 @@ async function UploadFileToS3Service({ file }) {
     const command = new PutObjectCommand(params);
     await s3bucket.send(command);
 
-    // *************** Construct the URL manually
-    const fileUrl = `https://${BUCKET_NAME}.s3.${REGION}.amazonaws.com/${uniqueKey}`;
+    // *************** Generate presigned GET URL with 72h expiry (WHY: secure time-limited access)
+    const expiresInSeconds = 72 * 3600;
+    const getCmd = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: uniqueKey });
+    const signedUrl = await getSignedUrl(s3bucket, getCmd, { expiresIn: expiresInSeconds });
 
     const fileUploadedResult = {
-      url: fileUrl,
+      url: signedUrl,
       key: uniqueKey,
     };
 

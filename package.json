@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.927.0",
+    "@aws-sdk/s3-request-presigner": "^3.927.0",
     "@modelcontextprotocol/sdk": "^1.21.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",

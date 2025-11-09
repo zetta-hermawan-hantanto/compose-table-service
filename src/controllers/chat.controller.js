@@ -30,6 +30,11 @@ async function HandleChatTurn(req, res) {
       throw new Error('Missing prompt');
     }
 
+    // *************** Validate lang parameter
+    if (['fr', 'en'].includes(req.body.lang)) {
+      throw new Error('Unsupported language for chat service');
+    }
+
     // *************** Validate user_id parameter
     const userId = req.userId;
 
