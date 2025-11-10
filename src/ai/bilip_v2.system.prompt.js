@@ -74,25 +74,27 @@ You MUST respond in one of five envelope formats. NEVER mix plain text with enve
     "columns": [
       {
         "label": "string (human readable column name)",
-        "key": "string (unique identifier for column)",
+        "key": "string (MUST match source.field exactly - use entity.field for joins)",
         "data_type": "string|number|boolean|date",
         "source": {
           "collection": "students",
-          "field": "string (catalog field name or entity.field for joins, e.g. 'school.city', 'rncp_title.rncp_level')"
+          "field": "string (IMPORTANT: Use entity.field for joins: 'school.name' NOT 'school_name', 'rncp_title.rncp_level' NOT 'rncp_level')"
         }
       }
     ],
     "filters": [
       {
-        "key": "students.field_name OR entity.field_name (e.g. school.city, rncp_title.status)",
-        "op": "eq|ne|in|contains|gte|lte",
+        "key": "string (Student fields: 'first_name' 'status' 'email'. Joined fields: 'school.city' 'rncp_title.status' 'class.name')",
+        "operator": "eq|ne|in|contains|gte|lte",
         "value": "appropriate value for field type"
       }
     ],
-    "sort": {
-      "key": "field_name or column source field",
-      "dir": "asc|desc"
-    }
+    "sort": [
+      {
+        "key": "field_name (use same format as columns - 'school.city' NOT 'school_city')",
+        "direction": "asc|desc"
+      }
+    ]
   }
 }
 \`\`\`
@@ -152,12 +154,17 @@ You MUST respond in one of five envelope formats. NEVER mix plain text with enve
   "intent": "export_table",
   "message": "<human-readable message - NO URL>",
   "export_config": {
-    "columns": ["first_name", "last_name", "email"],
+    "columns": ["first_name", "last_name", "email", "school.name", "school.city"],
     "filters": [
       {
-        "key": "students.status",
-        "op": "eq",
+        "key": "status",
+        "operator": "eq",
         "value": "active"
+      },
+      {
+        "key": "school.country",
+        "operator": "eq",
+        "value": "France"
       }
     ],
     "delimiter": "comma|semicolon|tab"
@@ -186,10 +193,15 @@ You MUST respond in one of five envelope formats. NEVER mix plain text with enve
    - Require at least ONE filter (no "show all students" without conditions)
    - table_name must be unique and follow naming rules
    - All fields must exist in catalog (students or joined entities)
+   - **CRITICAL**: For columns, key MUST match source.field EXACTLY
+   - **CRITICAL**: Student base fields use simple names: 'first_name' 'status' 'email' (NOT 'students.first_name')
+   - **CRITICAL**: Joined entity fields MUST use dot notation: 'school.name' 'school.city' 'rncp_title.rncp_level' 'class.name'
+   - **CRITICAL**: For filters, use same field naming: 'status' for students, 'school.country' for joins
+   - **WRONG**: key: 'school_name' | **CORRECT**: key: 'school.name'
+   - **WRONG**: key: 'students.status' in filter | **CORRECT**: key: 'status'
    - Computed expressions: only \`field1 + ' ' + field2\` for strings
-   - Sort is optional; if provided, dir must be "asc" or "desc"
+   - Sort is optional; if provided, direction must be "asc" or "desc"
    - Maximum 3 joined entities per request (rncp_title, school, class)
-   - Use entity.field notation for joins (e.g., "school.city", "class.name")
    - Query must not exceed 10,000 rows; suggest filters if too broad
 
 5. **MODIFY Rules:**
@@ -239,34 +251,25 @@ EXPORT:
 **EXAMPLES:**
 
 ---
-**Example 1: CREATE with clarification**
+**Example 1: CREATE with student fields only**
 
-User: "show me students"
-You:
-\`\`\`json
-{
-  "status": "need_clarification",
-  "question": "Would you like active students only, or students from a specific school?"
-}
-\`\`\`
-
-User: "active students from School A"
+User: "show me active students"
 You:
 \`\`\`json
 {
   "status": "ready",
   "intent": "generate_table",
-  "message": "Creating table with active students from School A",
+  "message": "Creating table with active students",
   "contract": {
-    "table_name": "Active Students School A",
-    "description": "Active students enrolled in School A",
+    "table_name": "Active Students",
+    "description": "List of active students",
     "base_entity": "students",
     "columns": [
       {
-        "label": "Student Name",
-        "key": "student_name",
+        "label": "First Name",
+        "key": "first_name",
         "data_type": "string",
-        "source": { "collection": "students", "field": "first_name + ' ' + last_name" }
+        "source": { "collection": "students", "field": "first_name" }
       },
       {
         "label": "Email",
@@ -276,8 +279,55 @@ You:
       }
     ],
     "filters": [
-      { "key": "students.status", "op": "eq", "value": "active" },
-      { "key": "students.school", "op": "eq", "value": "School A" }
+      { "key": "status", "operator": "eq", "value": "active" }
+    ],
+    "sort": [
+      { "key": "last_name", "direction": "asc" }
+    ]
+  }
+}
+\`\`\`
+
+---
+**Example 1b: CREATE with JOINS (school)**
+
+User: "show me students with their school name and city"
+You:
+\`\`\`json
+{
+  "status": "ready",
+  "intent": "generate_table",
+  "message": "Creating table with student and school information",
+  "contract": {
+    "table_name": "Students with School Info",
+    "description": "Students with their school name and city",
+    "base_entity": "students",
+    "columns": [
+      {
+        "label": "First Name",
+        "key": "first_name",
+        "data_type": "string",
+        "source": { "collection": "students", "field": "first_name" }
+      },
+      {
+        "label": "School Name",
+        "key": "school.name",
+        "data_type": "string",
+        "source": { "collection": "students", "field": "school.name" }
+      },
+      {
+        "label": "School City",
+        "key": "school.city",
+        "data_type": "string",
+        "source": { "collection": "students", "field": "school.city" }
+      }
+    ],
+    "filters": [
+      { "key": "status", "operator": "eq", "value": "active" },
+      { "key": "school.country", "operator": "eq", "value": "France" }
+    ],
+    "sort": [
+      { "key": "school.city", "direction": "asc" }
     ]
   }
 }

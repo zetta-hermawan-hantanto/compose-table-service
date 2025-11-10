@@ -130,6 +130,8 @@ function BuildCsvFromRows({ columns, rows, delimiter }) {
   // *************** Validate and map delimiter
   const delimiterChar = MapDelimiterToChar(delimiter);
 
+  console.log(columns, rows)
+
   // *************** Build header row from column names
   const headerCells = [];
   for (let i = 0; i < columns.length; i++) {

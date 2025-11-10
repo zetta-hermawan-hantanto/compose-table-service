@@ -2,18 +2,17 @@
 const mongoose = require('mongoose');
 
 // *************** IMPORT MODULE ***************
-const ExportHistoryModel = require('../models/export.history.model');
 const ErrorLogModel = require('../models/error_log.model');
+const PlanValidator = require('../validators/plan.validator');
+const JoinPlanner = require('./join.planner');
+const AggregationBuilderV2 = require('../utils/aggregation.builder.v2');
 
 // *************** IMPORT UTILITIES ***************
-const { ValidateExportRequest } = require('../validators/export.validator');
-const { BuildMongoFilter } = require('../utils/query.builders');
+const { ValidateExportRequest } = require('../validators/export.validator.v4.2');
 const { BuildCsvFromRows } = require('../utils/csv.builder');
 const { UploadCsvToS3 } = require('../utils/s3.uploader');
 const { SendExportEmail } = require('../utils/email');
 const { GetExportSuccessMessage, GetExportFailureMessage } = require('../utils/export.messages');
-const { BuildStudentAggregation, DetectRequiredJoins } = require('../utils/aggregation.builder');
-const { ParseFieldPath } = require('../utils/path.validator');
 
 /**
  * ProcessExportTurn handles CSV export request from chat conversation.
@@ -103,50 +102,50 @@ async function ProcessExportTurn({ user_id, conversation_id, export_config, lang
     const validatedFilters = validatedConfig.filters;
     const validatedDelimiter = validatedConfig.delimiter;
 
-    // *************** Build column objects for join detection
-    const columnObjects = validatedColumns.map((colName) => ({
-      key: colName,
-      source: { field: colName },
-    }));
+    // *************** Convert export config to v4.2 plan format
+    const plan = {
+      entry: 'students',
+      columns: validatedColumns.map((colName) => ({
+        path: colName,
+        alias: colName,
+      })),
+      filters: validatedFilters.map((filter) => ({
+        path: filter.key,
+        op: filter.operator,
+        value: filter.value,
+      })),
+      sort: null,
+      limit: 10000,
+      metadata: {
+        intent: 'export_table',
+      },
+    };
 
-    // *************** Detect if joins are required for v4
-    const requiredJoins = DetectRequiredJoins({
-      columns: columnObjects,
-      filters: validatedFilters,
-    });
-
-    let studentRecords;
-
-    if (requiredJoins.size > 0) {
-      // *************** v4 export with joins use aggregation pipeline
-      const pipeline = BuildStudentAggregation({
-        columns: columnObjects,
-        filters: validatedFilters,
-        sort: null,
-      });
-
-      // *************** Execute aggregation query
-      studentRecords = await StudentModel.aggregate(pipeline);
-    } else {
-      // *************** v3 export students-only use direct query
-      const mongoFilter = BuildMongoFilter(validatedFilters);
-
-      // *************** Build projection from validated columns
-      const projection = {};
-      for (let i = 0; i < validatedColumns.length; i++) {
-        const columnName = validatedColumns[i];
-        // *************** Extract field name from path if needed
-        const parsed = ParseFieldPath(columnName);
-        if (parsed.field) {
-          projection[parsed.field] = 1;
-        } else {
-          projection[columnName] = 1;
-        }
-      }
-
-      // *************** Execute query with lean for performance
-      studentRecords = await StudentModel.find(mongoFilter).select(projection).lean();
+    // *************** Validate plan against catalog using v4.2 validator
+    const validation = PlanValidator.ValidatePlan(plan);
+    if (!validation.isValid) {
+      return {
+        status: 'failed',
+        conversation_id: conversation_id,
+        messages: [
+          {
+            role: 'assistant',
+            message: `Export validation failed: ${validation.errors.join('; ')}`,
+          },
+        ],
+        explanation: validation.errors.join('; '),
+        options: ['Fix the columns or filters and try again'],
+      };
     }
+
+    // *************** Plan joins from field paths
+    const joinPlan = JoinPlanner.PlanJoins(plan);
+
+    // *************** Build aggregation pipeline using v4.2 engine
+    const pipeline = AggregationBuilderV2.BuildPipeline(plan, joinPlan);
+
+    // *************** Execute aggregation pipeline
+    const studentRecords = await StudentModel.aggregate(pipeline);
 
     // *************** Build CSV content from query results
     const csvContent = BuildCsvFromRows({
@@ -170,20 +169,6 @@ async function ProcessExportTurn({ user_id, conversation_id, export_config, lang
       csvResultString: `Exported ${studentRecords.length} rows with ${validatedColumns.length} columns`,
       fileUrl: uploadResult.url,
       lang: effectiveLang,
-    });
-
-    // *************** Persist export history record
-    await ExportHistoryModel.create({
-      user_id: user_id,
-      conversation_id: conversation_id || null,
-      columns: validatedColumns,
-      filters: validatedFilters,
-      delimiter: validatedDelimiter,
-      row_count: studentRecords.length,
-      file_key: uploadResult.key,
-      file_expires_at: uploadResult.expires_at,
-      lang: effectiveLang,
-      status: 'success',
     });
 
     // *************** Construct success envelope with human message
@@ -218,31 +203,6 @@ async function ProcessExportTurn({ user_id, conversation_id, export_config, lang
       path: 'src/services/export.service.js',
       error: String(error.stack),
     });
-
-    // *************** Persist failed export history record
-    try {
-      await ExportHistoryModel.create({
-        user_id: user_id,
-        conversation_id: conversation_id || null,
-        columns: export_config?.columns || [],
-        filters: export_config?.filters || [],
-        delimiter: export_config?.delimiter || 'comma',
-        row_count: 0,
-        file_key: 'failed',
-        file_expires_at: new Date(),
-        lang: lang || 'en',
-        status: 'failed',
-        error_message: error.message,
-      });
-    } catch (historyError) {
-      // *************** Log history persistence failure but do not throw
-      await ErrorLogModel.create({
-        name_function: 'ProcessExportTurn-HistoryFallback',
-        parameter_input: JSON.stringify({ user_id: user_id }),
-        path: 'src/services/export.service.js',
-        error: String(historyError.stack),
-      });
-    }
 
     // *************** Return runtime failure envelope
     const effectiveLang = lang === 'fr' ? 'fr' : 'en';

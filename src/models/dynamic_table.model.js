@@ -48,7 +48,7 @@ const DynamicTableSchema = new Schema(
         key: { type: String, required: true },
 
         // Filter operator
-        op: { type: String, required: true },
+        operator: { type: String, required: true },
 
         // Filter value
         value: { type: Schema.Types.Mixed, required: true },

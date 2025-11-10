@@ -7,11 +7,11 @@ const { CreateMcpServer } = require('../mcp/mcp.server');
 const { CreateMcpClient } = require('../mcp/mcp.client');
 const { GetBilipV2SystemPrompt } = require('../ai/bilip_v2.system.prompt');
 const { CallAIWithEnvelope } = require('../utils/ai.reasoner');
-const { BuildMongoFilter, BuildProjection, BuildSort } = require('../utils/query.builders');
-const { EstimateRowCount, EnforceRowCap } = require('../utils/row.estimator');
 const { ProcessExportTurn } = require('./export.service');
-const { BuildStudentAggregation, DetectRequiredJoins } = require('../utils/aggregation.builder');
-const { CountJoinsInContract, EnforceJoinLimit } = require('../utils/path.validator');
+const CatalogService = require('./catalog.service');
+const PlanValidator = require('../validators/plan.validator');
+const JoinPlanner = require('./join.planner');
+const AggregationBuilderV2 = require('../utils/aggregation.builder.v2');
 
 // *************** IMPORT MODULES ***************
 const StudentModel = require('../models/student.model');
@@ -20,64 +20,65 @@ const DynamicRowTableModel = require('../models/dynamic_row_table.model');
 const ErrorLogModel = require('../models/error_log.model');
 
 // *************** IMPORT VALIDATORS ***************
-const { ValidateStudentsContract } = require('../validators/contract.validator');
+const { ValidateStudentsContract } = require('../validators/contract.validator.v4.2');
 const { ValidateModifyContract } = require('../validators/modify.validator');
 
 /**
- * ResolveStudentValue extracts column value from student document.
- * Handles both direct field access and computed string concatenation expressions.
- * Reuses v1 logic for backward compatibility in row transformation.
- * @param {object} studentDoc - Student document from MongoDB query.
- * @param {object} columnDef - Column definition with source field information.
- * @returns {any} - Resolved value for the column or null if missing.
+ * ConvertContractToPlan converts v3 contract format to v4.2 plan format.
+ * Extracts columns filters and sort from validated contract into plan structure.
+ * @param {object} contract - Validated contract from AI or validation layer.
+ * @returns {object} - Plan object compatible with v4.2 engine.
  */
-function ResolveStudentValue(studentDoc, columnDef) {
-  // *************** Check if source field is computed expression
-  const isComputedExpression = columnDef.source.field.includes('+');
+function ConvertContractToPlan(contract) {
+  // *************** Extract entry entity default to students
+  const entry = contract.entry || 'students';
 
-  if (isComputedExpression) {
-    // *************** Parse computed expression for field names
-    const concatPattern = /^(\w+)\s*\+\s*'([^']*)'\s*\+\s*(\w+)$/;
-    const matchResult = columnDef.source.field.match(concatPattern);
+  // *************** Convert columns from contract format to plan format
+  const columns = contract.columns.map((col) => ({
+    path: col.key,
+    alias: col.key,
+  }));
 
-    if (!matchResult) {
-      return null;
-    }
+  // *************** Convert filters from contract format to plan format
+  const filters = (contract.filters || []).map((filter) => ({
+    path: filter.key,
+    op: filter.operator,
+    value: filter.value,
+  }));
 
-    const firstField = matchResult[1];
-    const separator = matchResult[2];
-    const secondField = matchResult[3];
-
-    // *************** Extract field values with fallback to empty string
-    const firstValue = studentDoc[firstField] || '';
-    const secondValue = studentDoc[secondField] || '';
-
-    // *************** Concatenate values with separator
-    const computedValue = firstValue + separator + secondValue;
-
-    return computedValue;
+  // *************** Convert sort from contract format to plan format
+  let sort = null;
+  if (contract.sort && contract.sort.length > 0) {
+    sort = contract.sort.map((s) => ({
+      path: s.key,
+      dir: s.direction,
+    }));
   }
 
-  // *************** Access direct field from student document
-  const fieldName = columnDef.key;
-  const fieldValue = studentDoc[fieldName];
+  // *************** Construct plan object
+  const plan = {
+    entry: entry,
+    columns: columns,
+    filters: filters,
+    sort: sort,
+    limit: contract.limit || 10000,
+    metadata: {
+      intent: 'generate_table',
+      table_name: contract.table_name,
+      description: contract.description,
+    },
+  };
 
-  // *************** Return null if field is missing or undefined
-  if (fieldValue === undefined || fieldValue  === null) {
-    return null;
-  }
-
-  return fieldValue;
+  return plan;
 }
 
 /**
  * RebuildTableRows deletes existing rows and rebuilds from current table configuration.
- * Triggers on any change to columns filters or sort in modify operations.
- * Supports v4 joined queries using aggregation pipeline when needed.
- * Enforces v4 10000 row cap to maintain performance.
+ * Uses v4.2 engine with PlanValidator JoinPlanner and AggregationBuilder v2.
+ * Reconstructs plan from table metadata and validates before execution.
  * @param {object} table - Dynamic table document with current configuration.
  * @returns {Promise<number>} - Promise resolving to number of rows inserted.
- * @throws {Error} - If row count exceeds cap or query fails.
+ * @throws {Error} - If validation fails or query fails.
  */
 async function RebuildTableRows(table) {
   // *************** Delete existing rows for this table
@@ -85,53 +86,55 @@ async function RebuildTableRows(table) {
     dynamic_table_id: table._id,
   });
 
-  // *************** Detect if joins are required for v4
-  const requiredJoins = DetectRequiredJoins({
-    columns: table.columns,
-    filters: table.filters,
-    sort: table.sort,
-  });
-
-  let studentDocs;
-
-  if (requiredJoins.size > 0) {
-    // *************** v4 path with joins use aggregation pipeline
-    const pipeline = BuildStudentAggregation({
-      columns: table.columns,
-      filters: table.filters,
-      sort: table.sort,
-    });
-
-    studentDocs = await StudentModel.aggregate(pipeline);
+  // *************** Reconstruct plan from table metadata or stored plan
+  let plan;
+  
+  if (table.plan_metadata && table.plan_metadata.plan) {
+    // *************** Use stored plan if available
+    plan = table.plan_metadata.plan;
   } else {
-    // *************** v3 path students-only use direct query
-    const mongoFilter = BuildMongoFilter(table.filters);
-    const projection = BuildProjection(table.columns);
-    const sortConfig = BuildSort(table.sort);
-
-    studentDocs = await StudentModel
-      .find(mongoFilter)
-      .select(projection)
-      .sort(sortConfig)
-      .lean();
+    // *************** Reconstruct plan from table columns filters sort
+    plan = {
+      entry: 'students',
+      columns: table.columns.map((col) => ({
+        path: col.key,
+        alias: col.key,
+      })),
+      filters: (table.filters || []).map((filter) => ({
+        path: filter.key,
+        op: filter.operator,
+        value: filter.value,
+      })),
+      sort: (table.sort || []).map((s) => ({
+        path: s.key,
+        dir: s.direction,
+      })),
+      limit: 10000,
+    };
   }
 
-  // *************** Transform student documents to row data
-  const rowsToInsert = studentDocs.map((doc) => {
-    const rowData = {};
+  // *************** Validate plan against catalog
+  const validation = PlanValidator.ValidatePlan(plan);
+  console.log(plan)
+  if (!validation.isValid) {
+    throw new Error(`Plan validation failed: ${validation.errors.join('; ')}`);
+  }
 
-    for (let i = 0; i < table.columns.length; i++) {
-      const column = table.columns[i];
-      const value = ResolveStudentValue(doc, column);
-      rowData[column.key] = value;
-    }
+  // *************** Plan joins from field paths
+  const joinPlan = JoinPlanner.PlanJoins(plan);
 
-    return {
-      dynamic_table_id: table._id,
-      data: rowData,
-      status: 'active',
-    };
-  });
+  // *************** Build aggregation pipeline using v4.2 engine
+  const pipeline = AggregationBuilderV2.BuildPipeline(plan, joinPlan);
+
+  // *************** Execute aggregation pipeline
+  const studentDocs = await StudentModel.aggregate(pipeline);
+
+  // *************** Transform documents to row data format
+  const rowsToInsert = studentDocs.map((doc) => ({
+    dynamic_table_id: table._id,
+    data: doc,
+    status: 'active',
+  }));
 
   // *************** Insert new rows if any exist
   if (rowsToInsert.length > 0) {
@@ -271,88 +274,52 @@ async function ProcessChatTurn(params) {
     }
 
     if (aiEnvelope.status === 'ready' && aiEnvelope.intent === 'generate_table') {
-      // *************** HANDLE CREATE PATH
+      // *************** HANDLE CREATE PATH with v4.2 engine
       
       // *************** Load catalog for validation
       const catalog = LoadCatalogMetadata();
 
-      // *************** Validate contract using v1 validator
+      // *************** Log AI contract for debugging
+      console.log('[DEBUG] AI Envelope Contract:', JSON.stringify(aiEnvelope.contract, null, 2));
+
+      // *************** Validate contract using v1 validator for backward compatibility
       const validatedContract = await ValidateStudentsContract(
         aiEnvelope.contract,
         catalog,
         params.user_id
       );
 
-      // *************** v4 Validate join limit if joins are present
-      const joinAnalysis = CountJoinsInContract(validatedContract);
-      if (joinAnalysis.joinCount > 0) {
-        const joinLimitCheck = EnforceJoinLimit(joinAnalysis.joinCount);
-        if (!joinLimitCheck.isValid) {
-          throw new Error(joinLimitCheck.error);
-        }
+      // *************** Log validated contract for debugging
+      console.log('[DEBUG] Validated Contract:', JSON.stringify(validatedContract, null, 2));
+
+      // *************** Convert contract to v4.2 plan format
+      const plan = ConvertContractToPlan(validatedContract);
+
+      // *************** Log converted plan for debugging
+      console.log('[DEBUG] Converted Plan:', JSON.stringify(plan, null, 2));
+
+      // *************** Validate plan against catalog using v4.2 validator
+      const validation = PlanValidator.ValidatePlan(plan);
+      if (!validation.isValid) {
+        throw new Error(`Plan validation failed: ${validation.errors.join('; ')}`);
       }
 
-      // *************** Detect if joins are required for v4
-      const requiredJoins = DetectRequiredJoins(validatedContract);
+      // *************** Plan joins from field paths
+      const joinPlan = JoinPlanner.PlanJoins(plan);
 
-      // *************** Build query based on join requirement
-      let studentDocs;
-      let estimatedCount;
+      // *************** Build aggregation pipeline using v4.2 engine
+      const pipeline = AggregationBuilderV2.BuildPipeline(plan, joinPlan);
 
-      if (requiredJoins.size > 0) {
-        // *************** v4 path with joins use aggregation pipeline
-        const pipeline = BuildStudentAggregation({
-          columns: validatedContract.columns,
-          filters: validatedContract.filters,
-          sort: validatedContract.sort,
-        });
+      console.log(pipeline)
 
-        // *************** Estimate row count with aggregation
-        estimatedCount = await EstimateRowCount(pipeline, StudentModel, true);
+      // *************** Execute aggregation pipeline
+      const studentDocs = await StudentModel.aggregate(pipeline);
 
-        // *************** Enforce v4 10k row cap
-        const rowCapCheck = EnforceRowCap(estimatedCount);
-        if (!rowCapCheck.isValid) {
-          throw new Error(rowCapCheck.error);
-        }
+      console.log(studentDocs.length);
 
-        // *************** Execute aggregation query
-        studentDocs = await StudentModel.aggregate(pipeline);
-      } else {
-        // *************** v3 path students-only use direct query
-        estimatedCount = await EstimateRowCount(validatedContract.filters, StudentModel, false);
+      console.log(validatedContract);
 
-        // *************** Enforce v4 10k row cap (backward compatible)
-        const rowCapCheck = EnforceRowCap(estimatedCount);
-        if (!rowCapCheck.isValid) {
-          throw new Error(rowCapCheck.error);
-        }
-
-        const mongoFilter = BuildMongoFilter(validatedContract.filters);
-        const projection = BuildProjection(validatedContract.columns);
-        const sortConfig = BuildSort(validatedContract.sort);
-
-        studentDocs = await StudentModel
-          .find(mongoFilter)
-          .select(projection)
-          .sort(sortConfig)
-          .lean();
-      }
-
-      // *************** Transform student documents to row data
-      const rowsToInsert = studentDocs.map((doc) => {
-        const rowData = {};
-
-        for (let i = 0; i < validatedContract.columns.length; i++) {
-          const column = validatedContract.columns[i];
-          const value = ResolveStudentValue(doc, column);
-          rowData[column.key] = value;
-        }
-
-        return rowData;
-      });
-
-      // *************** Create dynamic table record
+      // *************** Create dynamic table record with plan metadata
       const createdTable = await DynamicTableModel.create({
         status: 'active',
         name: validatedContract.table_name,
@@ -362,15 +329,21 @@ async function ProcessChatTurn(params) {
         sort: validatedContract.sort || undefined,
         created_by: params.user_id,
         session_chat_id: params.session._id,
+        plan_metadata: {
+          plan: plan,
+          pipeline: pipeline,
+          join_plan: joinPlan,
+        },
       });
 
-      // *************** Insert rows with table reference
-      const rowsWithTableId = rowsToInsert.map((rowData) => ({
+      // *************** Transform documents to row data format
+      const rowsWithTableId = studentDocs.map((doc) => ({
         dynamic_table_id: createdTable._id,
-        data: rowData,
+        data: doc,
         status: 'active',
       }));
 
+      // *************** Insert rows with table reference
       if (rowsWithTableId.length > 0) {
         await DynamicRowTableModel.insertMany(rowsWithTableId);
       }
@@ -390,6 +363,7 @@ async function ProcessChatTurn(params) {
             columns: createdTable.columns.map((col) => col.key),
             filters: createdTable.filters,
             sort: createdTable.sort || undefined,
+            join_count: joinPlan.joinCount,
           },
         },
       };

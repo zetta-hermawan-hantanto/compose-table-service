@@ -1,85 +1,151 @@
 {
-  "version": "2025-11-09",
+  "version": "4.2.0",
+  "version_date": "2025-11-10",
+  "description": "BILIP v4.2 Catalog - Centralized, catalog-driven aggregation engine with dynamic join planning",
+  "default_entry": "students",
   "entities": [
     {
       "name": "students",
+      "collection": "students",
       "title": "Students",
       "description": "Core student profile records",
       "primary_key": "_id",
+      "is_entry": true,
+      "index_hints": ["school_1", "rncp_title_1", "current_class_1", "status_1"],
       "fields": [
-        { "name": "_id", "type": "objectId" },
-        { "name": "school", "type": "objectId", "ref": "school" },
-        { "name": "first_name", "type": "string" },
-        { "name": "last_name", "type": "string" },
-        { "name": "email", "type": "string" },
-        { "name": "professional_email", "type": "string" },
-        { "name": "tele_phone", "type": "string" },
-        { "name": "sex", "type": "string", "enum": ["M", "F"] },
-        { "name": "civility", "type": "string", "enum": ["MR", "MRS"] },
-        { "name": "status", "type": "string", "enum": ["active", "pending", "deleted"] },
-        { "name": "student_title_status", "type": "string", "enum": ["current_active","completed","suspended","deactivated","retaking","admission","admission_need_validation","admission_ask_for_revision"] },
-        { "name": "admission_status", "type": "string", "enum": ["not_received","received_inprogress","received_not_completed","received_completed"] },
-        { "name": "identity_verification_status", "type": "string", "enum": ["not_sent","sent_to_student","details_confirmed","due_date_passed"] },
-        { "name": "place_of_birth", "type": "string" },
-        { "name": "nationality", "type": "string" },
-        { "name": "current_class", "type": "objectId", "ref": "class" },
-        { "name": "rncp_title", "type": "objectId", "ref": "rncp_title" },
-        { "name": "user_id", "type": "objectId", "ref": "user" },
-        { "name": "createdAt", "type": "date" },
-        { "name": "updatedAt", "type": "date" }
+        { "name": "_id", "type": "objectId", "allowed_ops": ["eq", "ne", "in"] },
+        { "name": "school", "type": "objectId", "ref": "school", "allowed_ops": ["eq", "ne", "in"] },
+        { "name": "first_name", "type": "string", "allowed_ops": ["eq", "ne", "in", "contains"] },
+        { "name": "last_name", "type": "string", "allowed_ops": ["eq", "ne", "in", "contains"] },
+        { "name": "email", "type": "string", "allowed_ops": ["eq", "ne", "in", "contains"] },
+        { "name": "professional_email", "type": "string", "allowed_ops": ["eq", "ne", "in", "contains"] },
+        { "name": "tele_phone", "type": "string", "allowed_ops": ["eq", "ne", "in", "contains"] },
+        { "name": "sex", "type": "string", "enum": ["M", "F"], "allowed_ops": ["eq", "ne", "in"] },
+        { "name": "civility", "type": "string", "enum": ["MR", "MRS"], "allowed_ops": ["eq", "ne", "in"] },
+        { "name": "status", "type": "string", "enum": ["active", "pending", "deleted"], "allowed_ops": ["eq", "ne", "in"] },
+        { "name": "student_title_status", "type": "string", "enum": ["current_active","completed","suspended","deactivated","retaking","admission","admission_need_validation","admission_ask_for_revision"], "allowed_ops": ["eq", "ne", "in"] },
+        { "name": "admission_status", "type": "string", "enum": ["not_received","received_inprogress","received_not_completed","received_completed"], "allowed_ops": ["eq", "ne", "in"] },
+        { "name": "identity_verification_status", "type": "string", "enum": ["not_sent","sent_to_student","details_confirmed","due_date_passed"], "allowed_ops": ["eq", "ne", "in"] },
+        { "name": "place_of_birth", "type": "string", "allowed_ops": ["eq", "ne", "in", "contains"] },
+        { "name": "nationality", "type": "string", "allowed_ops": ["eq", "ne", "in", "contains"] },
+        { "name": "current_class", "type": "objectId", "ref": "class", "allowed_ops": ["eq", "ne", "in"] },
+        { "name": "rncp_title", "type": "objectId", "ref": "rncp_title", "allowed_ops": ["eq", "ne", "in"] },
+        { "name": "user_id", "type": "objectId", "ref": "user", "allowed_ops": ["eq", "ne", "in"] },
+        { "name": "createdAt", "type": "date", "allowed_ops": ["eq", "ne", "gte", "lte"] },
+        { "name": "updatedAt", "type": "date", "allowed_ops": ["eq", "ne", "gte", "lte"] }
       ],
       "safe_preview_fields": ["first_name","last_name","email","status","student_title_status"]
     },
     {
       "name": "rncp_title",
+      "collection": "rncp_titles",
       "title": "RNCP Title",
       "description": "RNCP certification titles",
       "primary_key": "_id",
+      "is_entry": false,
+      "index_hints": ["status_1"],
       "fields": [
-        { "name": "short_name", "type": "string" },
-        { "name": "long_name", "type": "string" },
-        { "name": "rncp_code", "type": "string" },
-        { "name": "rncp_level", "type": "string" },
-        { "name": "status", "type": "string" },
-        { "name": "year_of_certification", "type": "number" }
+        { "name": "short_name", "type": "string", "allowed_ops": ["eq", "ne", "in", "contains"] },
+        { "name": "long_name", "type": "string", "allowed_ops": ["eq", "ne", "in", "contains"] },
+        { "name": "rncp_code", "type": "string", "allowed_ops": ["eq", "ne", "in", "contains"] },
+        { "name": "rncp_level", "type": "string", "allowed_ops": ["eq", "ne", "in"] },
+        { "name": "status", "type": "string", "allowed_ops": ["eq", "ne", "in"] },
+        { "name": "year_of_certification", "type": "number", "allowed_ops": ["eq", "ne", "gte", "lte", "in"] }
       ],
       "safe_preview_fields": ["short_name","rncp_code","rncp_level","status"]
     },
     {
       "name": "school",
+      "collection": "schools",
       "title": "School",
       "description": "Educational institutions",
       "primary_key": "_id",
+      "is_entry": false,
+      "index_hints": ["status_1"],
       "fields": [
-        { "name": "short_name", "type": "string" },
-        { "name": "long_name", "type": "string" },
-        { "name": "status", "type": "string" },
-        { "name": "school_siret", "type": "string" },
-        { "name": "city", "type": "string", "computed": "from school_address where is_main_address=true" },
-        { "name": "country", "type": "string", "computed": "from school_address where is_main_address=true" }
+        { "name": "short_name", "type": "string", "allowed_ops": ["eq", "ne", "in", "contains"] },
+        { "name": "long_name", "type": "string", "allowed_ops": ["eq", "ne", "in", "contains"] },
+        { "name": "status", "type": "string", "allowed_ops": ["eq", "ne", "in"] },
+        { "name": "school_siret", "type": "string", "allowed_ops": ["eq", "ne", "in", "contains"] },
+        { "name": "city", "type": "string", "computed": "from school_address where is_main_address=true", "allowed_ops": ["eq", "ne", "in", "contains"] },
+        { "name": "country", "type": "string", "computed": "from school_address where is_main_address=true", "allowed_ops": ["eq", "ne", "in"] }
       ],
       "safe_preview_fields": ["short_name","city","country"]
     },
     {
       "name": "class",
+      "collection": "classes",
       "title": "Class",
       "description": "Student class groups",
       "primary_key": "_id",
+      "is_entry": false,
+      "index_hints": ["status_1", "year_of_certification_1"],
       "fields": [
-        { "name": "name", "type": "string" },
-        { "name": "status", "type": "string" },
-        { "name": "year_of_certification", "type": "number" },
-        { "name": "type_evaluation", "type": "string" },
-        { "name": "evaluation_step", "type": "string" },
-        { "name": "class_active", "type": "boolean" }
+        { "name": "name", "type": "string", "allowed_ops": ["eq", "ne", "in", "contains"] },
+        { "name": "status", "type": "string", "allowed_ops": ["eq", "ne", "in"] },
+        { "name": "year_of_certification", "type": "number", "allowed_ops": ["eq", "ne", "gte", "lte", "in"] },
+        { "name": "type_evaluation", "type": "string", "allowed_ops": ["eq", "ne", "in"] },
+        { "name": "evaluation_step", "type": "string", "allowed_ops": ["eq", "ne", "in"] },
+        { "name": "class_active", "type": "boolean", "allowed_ops": ["eq", "ne"] }
       ],
       "safe_preview_fields": ["name","year_of_certification","status"]
     }
   ],
   "relations": [
-    { "from": "students.rncp_title", "to": "rncp_title._id", "type": "one_to_one" },
-    { "from": "students.school", "to": "school._id", "type": "one_to_one" },
-    { "from": "students.current_class", "to": "class._id", "type": "one_to_one" }
+    { 
+      "from": "students.rncp_title", 
+      "to": "rncp_title._id", 
+      "type": "one_to_one",
+      "alias": "rncp_title",
+      "collection": "rncp_titles",
+      "foreign_field": "_id",
+      "local_field": "rncp_title",
+      "preserve_nulls": true
+    },
+    { 
+      "from": "students.school", 
+      "to": "school._id", 
+      "type": "one_to_one",
+      "alias": "school",
+      "collection": "schools",
+      "foreign_field": "_id",
+      "local_field": "school",
+      "preserve_nulls": true,
+      "pipeline_extensions": [
+        {
+          "$addFields": {
+            "main_address": {
+              "$filter": {
+                "input": { "$ifNull": ["$school_address", []] },
+                "as": "addr",
+                "cond": { "$eq": ["$$addr.is_main_address", true] }
+              }
+            }
+          }
+        },
+        {
+          "$addFields": {
+            "main_addr_doc": {
+              "$cond": {
+                "if": { "$gt": [{ "$size": "$main_address" }, 0] },
+                "then": { "$arrayElemAt": ["$main_address", 0] },
+                "else": { "$arrayElemAt": [{ "$ifNull": ["$school_address", []] }, 0] }
+              }
+            }
+          }
+        }
+      ]
+    },
+    { 
+      "from": "students.current_class", 
+      "to": "class._id", 
+      "type": "one_to_one",
+      "alias": "class",
+      "collection": "classes",
+      "foreign_field": "_id",
+      "local_field": "current_class",
+      "preserve_nulls": true
+    }
   ],
   "constraints": {
     "max_columns_per_table": 30,

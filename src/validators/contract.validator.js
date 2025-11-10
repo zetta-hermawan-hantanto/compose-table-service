@@ -1,6 +1,7 @@
 // *************** IMPORT MODULE ***************
 const DynamicTableModel = require('../models/dynamic_table.model');
 const ErrorLogModel = require('../models/error_log.model');
+const CatalogService = require('../services/catalog.service');
 
 /**
  * ValidateTableName checks if table name meets format and length requirements.
@@ -55,18 +56,18 @@ function ValidateColumnKeys(columns) {
 /**
  * ValidateComputedExpression checks if computed field expression is valid.
  * Only supports simple string concatenation format field1 + separator + field2.
+ * Uses CatalogService to validate field existence and types.
  * @param {string} expression - The computed expression to validate.
- * @param {object} catalog - The catalog object containing field definitions.
  * @returns {object} - Object with valid flag and optional error message.
  */
-function ValidateComputedExpression(expression, catalog) {
+function ValidateComputedExpression(expression) {
   // *************** Validate expression parameter
   if (!expression) {
     return { valid: false, error: 'Expression is required' };
   }
 
   // *************** Check for simple concatenation pattern
-  const concatPattern = /^(\w+)\s*\+\s*'([^']*)'\s*\+\s*(\w+)$/;
+  const concatPattern = /(\w+)\s*\+\s*'([^']*)'\s*\+\s*(\w+)$/;
   const matchResult = expression.match(concatPattern);
 
   if (!matchResult) {
@@ -77,27 +78,27 @@ function ValidateComputedExpression(expression, catalog) {
   const firstField = matchResult[1];
   const secondField = matchResult[3];
 
-  // *************** Find fields in catalog
-  const firstFieldExists = catalog.fields.some((field) => field.key === firstField);
-  const secondFieldExists = catalog.fields.some((field) => field.key === secondField);
+  // *************** Validate fields using CatalogService
+  const firstFieldValid = CatalogService.ValidateFieldPath(firstField);
+  const secondFieldValid = CatalogService.ValidateFieldPath(secondField);
 
-  if (!firstFieldExists) {
+  if (!firstFieldValid) {
     return { valid: false, error: `Field ${firstField} not found in catalog` };
   }
 
-  if (!secondFieldExists) {
+  if (!secondFieldValid) {
     return { valid: false, error: `Field ${secondField} not found in catalog` };
   }
 
   // *************** Validate both fields are string type
-  const firstFieldDef = catalog.fields.find((field) => field.key === firstField);
-  const secondFieldDef = catalog.fields.find((field) => field.key === secondField);
+  const firstFieldType = CatalogService.GetFieldType(firstField);
+  const secondFieldType = CatalogService.GetFieldType(secondField);
 
-  if (firstFieldDef.data_type !== 'string') {
+  if (firstFieldType !== 'string') {
     return { valid: false, error: `Field ${firstField} must be string type for concatenation` };
   }
 
-  if (secondFieldDef.data_type !== 'string') {
+  if (secondFieldType !== 'string') {
     return { valid: false, error: `Field ${secondField} must be string type for concatenation` };
   }
 
