@@ -306,10 +306,6 @@ async function ValidateStudentsContract(contract, catalog, createdByUserId) {
         throw new Error(`Filter ${i} missing key`);
       }
 
-      if (!filter.key.startsWith('students.')) {
-        throw new Error(`Filter ${i} key must start with students.`);
-      }
-
       const fieldName = filter.key.replace('students.', '');
       const catalogField = catalog.fields.find((field) => field.key === fieldName);
 
