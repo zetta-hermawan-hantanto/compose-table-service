@@ -452,7 +452,11 @@ async function ProcessChatTurn(params) {
 
       if (validatedChanges.add_filters) {
         for (let i = 0; i < validatedChanges.add_filters.length; i++) {
-          existingTable.filters.push(validatedChanges.add_filters[i]);
+          existingTable.filters.push({
+            key: validatedChanges.add_filters[i].key,
+            operator: validatedChanges.add_filters[i].op,
+            value: validatedChanges.add_filters[i].value,
+          });
         }
       }
 
@@ -471,7 +475,11 @@ async function ProcessChatTurn(params) {
           const filterIndex = existingTable.filters.findIndex((f) => f.key === updatedFilter.key);
 
           if (filterIndex !== -1) {
-            existingTable.filters[filterIndex] = updatedFilter;
+            existingTable.filters[filterIndex] = {
+              key: updatedFilter.key,
+              operator: updatedFilter.op,
+              value: updatedFilter.value,
+            }
           }
         }
       }
