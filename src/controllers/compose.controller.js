@@ -59,6 +59,7 @@ async function GetAiTableById(req, res) {
         filters: tableData.filters,
         status: tableData.status,
         created_at: tableData.created_at,
+        session_chat_id: tableData.session_chat_id,
       },
       rows: rowsData.map((row) => ({
         id: row._id,
@@ -170,6 +171,7 @@ async function UpdateAITable(req, res) {
   if (!req) {
     return res.status(400).json({ error: 'Request object is required' });
   }
+  
   if (!req.params) {
     return res.status(400).json({ error: 'Request params are required' });
   }
@@ -216,6 +218,7 @@ async function UpdateAITable(req, res) {
   if (normalizedName !== null) {
     updatePayload.name = normalizedName;
   }
+
   if (incomingDescRaw !== null) {
     updatePayload.description = String(incomingDescRaw).trim();
   }

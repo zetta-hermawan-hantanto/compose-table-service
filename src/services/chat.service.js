@@ -361,7 +361,7 @@ async function ProcessChatTurn(params) {
         filters: validatedContract.filters,
         sort: validatedContract.sort || undefined,
         created_by: params.user_id,
-        conversation_id: params.session._id,
+        session_chat_id: params.session._id,
       });
 
       // *************** Insert rows with table reference
