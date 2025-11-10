@@ -68,6 +68,11 @@ async function GetAiTableById(req, res) {
       .limit(limit)
       .skip(skip);
 
+    const countTotalRow = await DynamicRowTableModel.countDocuments({
+      dynamic_table_id: tableId,
+      status: 'active',
+    });
+
     // *************** Construct output response
     const outputResponse = {
       table: {
@@ -86,6 +91,7 @@ async function GetAiTableById(req, res) {
         created_at: row.created_at,
       })),
       total_rows_preview: rowsData.length,
+      total_rows: countTotalRow,
     };
 
     return res.status(200).json(outputResponse);
@@ -449,15 +455,17 @@ function FlattenRowDataForCsv(inputObj, prefix = '') {
     }
 
     if (Array.isArray(value)) {
-      const arrayJoined = value.map(function mapArrayToString(arrayItem) {
-        if (arrayItem === null || arrayItem === undefined) {
-          return '';
-        }
-        if (arrayItem instanceof Date) {
-          return arrayItem.toISOString();
-        }
-        return String(arrayItem);
-      }).join(', ');
+      const arrayJoined = value
+        .map(function mapArrayToString(arrayItem) {
+          if (arrayItem === null || arrayItem === undefined) {
+            return '';
+          }
+          if (arrayItem instanceof Date) {
+            return arrayItem.toISOString();
+          }
+          return String(arrayItem);
+        })
+        .join(', ');
       outputObject[nextPrefix] = arrayJoined;
       continue;
     }
@@ -500,10 +508,11 @@ function CsvEscapeSimple(rawValue, delimiter) {
     }
   }
 
-  const mustQuote = stringValue.indexOf(delimiter) >= 0
-    || stringValue.indexOf('\n') >= 0
-    || stringValue.indexOf('\r') >= 0
-    || stringValue.indexOf('"') >= 0;
+  const mustQuote =
+    stringValue.indexOf(delimiter) >= 0 ||
+    stringValue.indexOf('\n') >= 0 ||
+    stringValue.indexOf('\r') >= 0 ||
+    stringValue.indexOf('"') >= 0;
 
   if (mustQuote) {
     const doubled = stringValue.replace(/"/g, '""');
@@ -552,7 +561,7 @@ async function ExportManualAITable(req, res) {
       throw new Error('Invalid delimiter');
     }
 
-    const exportLang = (typeof languageInput === 'string' && (languageInput === 'fr' || languageInput === 'en')) ? languageInput : 'en';
+    const exportLang = typeof languageInput === 'string' && (languageInput === 'fr' || languageInput === 'en') ? languageInput : 'en';
 
     // *************** Query Section (collect rows according to selection)
     const collectedRows = [];
@@ -562,7 +571,7 @@ async function ExportManualAITable(req, res) {
         const queryResultExcluded = await DynamicRowTableModel.find({
           dynamic_table_id: tableId,
           status: 'active',
-          _id: { $nin: excludedIds }
+          _id: { $nin: excludedIds },
         }).lean();
         for (let i = 0; i < queryResultExcluded.length; i++) {
           collectedRows.push(queryResultExcluded[i]);
@@ -570,7 +579,7 @@ async function ExportManualAITable(req, res) {
       } else {
         const queryResultAll = await DynamicRowTableModel.find({
           dynamic_table_id: tableId,
-          status: 'active'
+          status: 'active',
         }).lean();
         for (let i = 0; i < queryResultAll.length; i++) {
           collectedRows.push(queryResultAll[i]);
@@ -581,7 +590,7 @@ async function ExportManualAITable(req, res) {
         const queryResultIncluded = await DynamicRowTableModel.find({
           dynamic_table_id: tableId,
           status: 'active',
-          _id: { $in: includedIds }
+          _id: { $in: includedIds },
         }).lean();
         for (let i = 0; i < queryResultIncluded.length; i++) {
           collectedRows.push(queryResultIncluded[i]);
@@ -602,9 +611,11 @@ async function ExportManualAITable(req, res) {
     const firstFlat = FlattenRowDataForCsv(firstRowData);
     const columnLabels = Object.keys(firstFlat);
 
-    const headerLine = columnLabels.map(function mapHeaderToEscaped(headerKey) {
-      return CsvEscapeSimple(headerKey, delimiter);
-    }).join(delimiter);
+    const headerLine = columnLabels
+      .map(function mapHeaderToEscaped(headerKey) {
+        return CsvEscapeSimple(headerKey, delimiter);
+      })
+      .join(delimiter);
 
     let csvBodyString = '';
     for (let r = 0; r < collectedRows.length; r++) {
@@ -629,14 +640,14 @@ async function ExportManualAITable(req, res) {
     const nameSource = 'export-students';
     const uploadResult = await UploadCsvToS3({
       csvContent: csvContent,
-      nameSource: nameSource
+      nameSource: nameSource,
     });
 
     await SendExportEmail({
       userId: req.userId,
       csvResultString: 'Exported ' + String(collectedRows.length) + ' rows with ' + String(columnLabels.length) + ' columns',
       fileUrl: uploadResult && uploadResult.url ? uploadResult.url : '',
-      lang: exportLang
+      lang: exportLang,
     });
 
     const successOutput = { success: true, rows_exported: collectedRows.length };
@@ -648,10 +659,10 @@ async function ExportManualAITable(req, res) {
       path: 'controllers/compose.controller.js',
       parameter_input: JSON.stringify({
         params: req ? req.params : null,
-        body: req ? req.body : null
+        body: req ? req.body : null,
       }),
       function_name: 'ExportManualAITable',
-      error: String(error.stack)
+      error: String(error.stack),
     });
 
     const failureResponse = res.status(500).json({ error: error.message });
