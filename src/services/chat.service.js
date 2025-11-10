@@ -115,7 +115,7 @@ async function RebuildTableRows(table) {
 
   // *************** Validate plan against catalog
   const validation = PlanValidator.ValidatePlan(plan);
-  console.log(plan)
+
   if (!validation.isValid) {
     throw new Error(`Plan validation failed: ${validation.errors.join('; ')}`);
   }
@@ -240,6 +240,20 @@ async function ProcessChatTurn(params) {
       content: msg.content,
     }));
 
+    // *************** Inject context information about current session state
+    const contextMessage = [];
+    if (params.session.table_id) {
+      contextMessage.push(`[CONTEXT: Current active table_id is "${params.session.table_id}". Use this ID when calling tables_get_schema for modify operations.]`);
+    }
+    
+    if (contextMessage.length > 0) {
+      // Add context as system-level instruction before user messages
+      conversationMessages.unshift({
+        role: 'system',
+        content: contextMessage.join('\n'),
+      });
+    }
+
     // *************** Call AI with envelope parsing
     const aiEnvelope = await CallAIWithEnvelope({
       messages: conversationMessages,
@@ -310,14 +324,8 @@ async function ProcessChatTurn(params) {
       // *************** Build aggregation pipeline using v4.2 engine
       const pipeline = AggregationBuilderV2.BuildPipeline(plan, joinPlan);
 
-      console.log(pipeline)
-
       // *************** Execute aggregation pipeline
       const studentDocs = await StudentModel.aggregate(pipeline);
-
-      console.log(studentDocs.length);
-
-      console.log(validatedContract);
 
       // *************** Create dynamic table record with plan metadata
       const createdTable = await DynamicTableModel.create({

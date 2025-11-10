@@ -56,13 +56,15 @@ const DynamicTableSchema = new Schema(
     ],
 
     // Optional sorting configuration for v2
-    sort: {
-      // Field key to sort by
-      key: { type: String },
+    sort: [
+      {
+        // Field key to sort by
+        key: { type: String },
 
-      // Sort direction asc or desc
-      dir: { type: String, enum: ['asc', 'desc'] },
-    },
+        // Sort direction asc or desc
+        dir: { type: String, enum: ['asc', 'desc'] },
+      },
+    ],
 
     // Indicates if the table is filterable
     filterable: { type: Boolean, default: true },

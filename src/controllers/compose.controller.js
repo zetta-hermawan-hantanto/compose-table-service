@@ -449,6 +449,10 @@ async function ExportManualAITable(req, res) {
         allRows.push(
           ...(await DynamicRowTableModel.find({ dynamic_table_id: tableId, status: 'active', _id: { $nin: excluded_ids } }).lean())
         );
+      } else {
+        allRows.push(
+          ...(await DynamicRowTableModel.find({ dynamic_table_id: tableId, status: 'active' }).lean())
+        );
       }
     } else {
       if (Array.isArray(included_ids) && included_ids.length) {

@@ -63,7 +63,7 @@ function BuildPipeline(plan, joinPlan) {
   }
 
   // *************** Stage 6: Sort (ordering)
-  if (plan.sort) {
+  if (plan.sort && plan.sort.length > 0) {
     const sortStage = BuildSortStage(plan.sort);
     if (sortStage) {
       pipeline.push(sortStage);

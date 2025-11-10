@@ -171,6 +171,7 @@ async function HandleChatTurn(req, res) {
       session: session,
       user_id: userId,
       lang: effectiveLang,
+      table_id: table_id || null,
     });
 
     // *************** Extract AI message from service result
