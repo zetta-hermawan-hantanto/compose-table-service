@@ -113,6 +113,8 @@ async function RebuildTableRows(table) {
     };
   }
 
+  console.log('[DEBUG] Rebuild Table Rows Plan:', JSON.stringify(plan, null, 2));
+  
   // *************** Validate plan against catalog
   const validation = PlanValidator.ValidatePlan(plan);
 
@@ -123,8 +125,12 @@ async function RebuildTableRows(table) {
   // *************** Plan joins from field paths
   const joinPlan = JoinPlanner.PlanJoins(plan);
 
+  console.log('[DEBUG] Rebuild Table Rows Join Plan:', JSON.stringify(joinPlan, null, 2));
+
   // *************** Build aggregation pipeline using v4.2 engine
   const pipeline = AggregationBuilderV2.BuildPipeline(plan, joinPlan);
+
+  console.log('[DEBUG] Rebuild Table Rows Pipeline:', JSON.stringify(pipeline, null, 2));
 
   // *************** Execute aggregation pipeline
   const studentDocs = await StudentModel.aggregate(pipeline);

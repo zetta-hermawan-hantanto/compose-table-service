@@ -38,6 +38,8 @@ const DynamicTableSchema = new Schema(
           collection: { type: String, required: true },
           field: { type: String, required: true },
         },
+        
+        _id: false, // Disable _id for subdocuments
       },
     ],
 
@@ -52,6 +54,8 @@ const DynamicTableSchema = new Schema(
 
         // Filter value
         value: { type: Schema.Types.Mixed, required: true },
+        
+        _id: false, // Disable _id for subdocuments
       },
     ],
 
@@ -62,7 +66,9 @@ const DynamicTableSchema = new Schema(
         key: { type: String },
 
         // Sort direction asc or desc
-        dir: { type: String, enum: ['asc', 'desc'] },
+        direction: { type: String, enum: ['asc', 'desc'] },
+        
+        _id: false, // Disable _id for subdocuments
       },
     ],
 
@@ -77,6 +83,13 @@ const DynamicTableSchema = new Schema(
 
     // Reference to the associated session chat
     session_chat_id: { type: Schema.Types.ObjectId, ref: 'session_chat' },
+
+    // Plan metadata for v4.2 engine (stores plan, pipeline, and join_plan)
+    plan_metadata: {
+      plan: { type: Schema.Types.Mixed },
+      pipeline: { type: Schema.Types.Mixed },
+      join_plan: { type: Schema.Types.Mixed },
+    },
   },
   {
     // Enable timestamps for createdAt and updatedAt
