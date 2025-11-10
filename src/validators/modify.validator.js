@@ -199,10 +199,6 @@ async function ValidateModifyContract(changes, existingTable, catalog) {
           throw new Error(`Filter ${i} in add_filters missing key`);
         }
 
-        if (!filter.key.startsWith('students.')) {
-          throw new Error(`Filter ${i} key must start with students.`);
-        }
-
         const fieldName = filter.key.replace('students.', '');
         const catalogField = catalog.fields.find((field) => field.key === fieldName);
 
@@ -231,10 +227,6 @@ async function ValidateModifyContract(changes, existingTable, catalog) {
 
         if (!filter.key) {
           throw new Error(`Filter ${i} in update_filters missing key`);
-        }
-
-        if (!filter.key.startsWith('students.')) {
-          throw new Error(`Filter ${i} key must start with students.`);
         }
       }
     }
