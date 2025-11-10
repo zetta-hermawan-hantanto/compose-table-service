@@ -34,6 +34,16 @@ async function GetAiTableById(req, res) {
       throw new Error('Missing table id');
     }
 
+    const { page = 1, limit = 10 } = req.query;
+
+    if (isNaN(page) || page < 1) {
+      throw new Error('Invalid page number');
+    }
+    
+    if (isNaN(limit) || limit < 1 || limit > 100) {
+      throw new Error('Invalid limit number');
+    }
+
     const tableId = req.params.id;
 
     // *************** Query dynamic table by id
@@ -48,11 +58,15 @@ async function GetAiTableById(req, res) {
       return res.status(404).json({ error: 'Table not found' });
     }
 
+    const skip = (page - 1) * limit;
+
     // *************** Query rows by dynamic_table_id with limit for preview
     const rowsData = await DynamicRowTableModel.find({
       dynamic_table_id: tableId,
       status: 'active',
-    }).limit(100);
+    })
+      .limit(limit)
+      .skip(skip);
 
     // *************** Construct output response
     const outputResponse = {
@@ -133,6 +147,7 @@ async function GetAllAiTables(req, res) {
         columns: table.columns,
         filters: table.filters,
         status: table.status,
+        session_chat_id: table.session_chat_id,
         created_at: table.created_at,
       })),
       total_tables: tablesData.length,
@@ -176,7 +191,7 @@ async function UpdateAITable(req, res) {
   if (!req) {
     return res.status(400).json({ error: 'Request object is required' });
   }
-  
+
   if (!req.params) {
     return res.status(400).json({ error: 'Request params are required' });
   }
@@ -437,7 +452,7 @@ async function ExportManualAITable(req, res) {
     if (typeof delimiter !== 'string' || !delimiter) {
       throw new Error('Invalid delimiter');
     }
-    
+
     if (!lang || typeof lang !== 'string' || ['fr', 'en'].includes(lang) === false) {
       lang = 'en';
     }
@@ -450,9 +465,7 @@ async function ExportManualAITable(req, res) {
           ...(await DynamicRowTableModel.find({ dynamic_table_id: tableId, status: 'active', _id: { $nin: excluded_ids } }).lean())
         );
       } else {
-        allRows.push(
-          ...(await DynamicRowTableModel.find({ dynamic_table_id: tableId, status: 'active' }).lean())
-        );
+        allRows.push(...(await DynamicRowTableModel.find({ dynamic_table_id: tableId, status: 'active' }).lean()));
       }
     } else {
       if (Array.isArray(included_ids) && included_ids.length) {
