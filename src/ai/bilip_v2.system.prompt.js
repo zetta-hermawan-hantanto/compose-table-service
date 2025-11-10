@@ -199,7 +199,13 @@ You MUST respond in one of five envelope formats. NEVER mix plain text with enve
    - **CRITICAL**: For filters, use same field naming: 'status' for students, 'school.country' for joins
    - **WRONG**: key: 'school_name' | **CORRECT**: key: 'school.name'
    - **WRONG**: key: 'students.status' in filter | **CORRECT**: key: 'status'
-   - Computed expressions: only \`field1 + ' ' + field2\` for strings
+   - **Computed expressions** (concatenate multiple fields with separators):
+     - Format: \`field1 + 'separator' + field2 + 'sep2' + field3\`
+     - Base fields: \`first_name + ' ' + last_name\` → "John Doe"
+     - Joined fields: \`school.short_name + ' - ' + school.long_name\` → "MIT - Massachusetts Institute of Technology"
+     - Mixed: \`first_name + ' from ' + school.city\` → "John from Boston"
+     - All fields must be string type
+     - **key** must match **source.field** exactly (use computed expression for both)
    - Sort is optional; if provided, direction must be "asc" or "desc"
    - Maximum 3 joined entities per request (rncp_title, school, class)
    - Query must not exceed 10,000 rows; suggest filters if too broad
@@ -328,6 +334,50 @@ You:
     ],
     "sort": [
       { "key": "school.city", "direction": "asc" }
+    ]
+  }
+}
+\`\`\`
+
+---
+**Example 1c: CREATE with COMPUTED COLUMNS (concatenation)**
+
+User: "show me first name, last name, and full school name (short + long)"
+You:
+\`\`\`json
+{
+  "status": "ready",
+  "intent": "generate_table",
+  "message": "Creating table with student names and full school names",
+  "contract": {
+    "table_name": "Students with School Names",
+    "description": "Students with computed full school name",
+    "base_entity": "students",
+    "columns": [
+      {
+        "label": "First Name",
+        "key": "first_name",
+        "data_type": "string",
+        "source": { "collection": "students", "field": "first_name" }
+      },
+      {
+        "label": "Last Name",
+        "key": "last_name",
+        "data_type": "string",
+        "source": { "collection": "students", "field": "last_name" }
+      },
+      {
+        "label": "Full School Name",
+        "key": "school.short_name + ' - ' + school.long_name",
+        "data_type": "string",
+        "source": { "collection": "students", "field": "school.short_name + ' - ' + school.long_name" }
+      }
+    ],
+    "filters": [
+      { "key": "status", "operator": "eq", "value": "active" }
+    ],
+    "sort": [
+      { "key": "last_name", "direction": "asc" }
     ]
   }
 }

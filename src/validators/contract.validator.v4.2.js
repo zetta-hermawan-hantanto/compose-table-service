@@ -2,6 +2,7 @@
 const DynamicTableModel = require('../models/dynamic_table.model');
 const ErrorLogModel = require('../models/error_log.model');
 const CatalogService = require('../services/catalog.service');
+const ComputedExpression = require('../utils/computed.expression');
 
 /**
  * BILIP V4.2 Contract Validator
@@ -43,49 +44,17 @@ function ValidateColumnKeys(columns) {
 
 /**
  * ValidateComputedExpression validates computed field expressions.
+ * Supports multi-field concatenation with both base and joined entity fields.
+ * Examples:
+ * - "first_name + ' ' + last_name"
+ * - "school.short_name + ' - ' + school.long_name"
+ * - "first_name + ' from ' + school.city"
  * @param {string} expression - The computed expression.
  * @returns {object} - Validation result.
  */
 function ValidateComputedExpression(expression) {
-  if (!expression) {
-    return { valid: false, error: 'Expression is required' };
-  }
-
-  const concatPattern = /(\w+)\s*\+\s*'([^']*)'\s*\+\s*(\w+)$/;
-  const matchResult = expression.match(concatPattern);
-
-  if (!matchResult) {
-    return { valid: false, error: 'Computed expression must be: field1 + separator + field2' };
-  }
-
-  const firstField = matchResult[1];
-  const secondField = matchResult[3];
-
-  // Validate using CatalogService
-  const firstFieldValid = CatalogService.ValidateFieldPath(firstField);
-  const secondFieldValid = CatalogService.ValidateFieldPath(secondField);
-
-  if (!firstFieldValid) {
-    return { valid: false, error: `Field ${firstField} not found in catalog` };
-  }
-
-  if (!secondFieldValid) {
-    return { valid: false, error: `Field ${secondField} not found in catalog` };
-  }
-
-  // Check both fields are string type
-  const firstFieldType = CatalogService.GetFieldType(firstField);
-  const secondFieldType = CatalogService.GetFieldType(secondField);
-
-  if (firstFieldType !== 'string') {
-    return { valid: false, error: `Field ${firstField} must be string type` };
-  }
-
-  if (secondFieldType !== 'string') {
-    return { valid: false, error: `Field ${secondField} must be string type` };
-  }
-
-  return { valid: true };
+  // Use enhanced computed expression utility
+  return ComputedExpression.ValidateComputedExpression(expression);
 }
 
 /**

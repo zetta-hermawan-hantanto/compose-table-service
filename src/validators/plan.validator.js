@@ -1,6 +1,9 @@
 // *************** IMPORT SERVICES ***************
 const CatalogService = require('../services/catalog.service');
 
+// *************** IMPORT UTILITIES ***************
+const ComputedExpression = require('../utils/computed.expression');
+
 /**
  * ValidatePlan validates an LLM-generated plan against v4.2 catalog.
  * Checks entry entity field paths operations join limits filter limits row caps.
@@ -140,11 +143,21 @@ function ValidateColumns(columns) {
       continue;
     }
 
-    // *************** Validate field path exists in catalog
-    const pathValid = CatalogService.ValidateFieldPath(column.path);
-    if (!pathValid) {
-      result.isValid = false;
-      result.errors.push(`Column path not found in catalog: ${column.path}`);
+    // *************** Check if this is a computed expression
+    if (ComputedExpression.IsComputedExpression(column.path)) {
+      // Validate computed expression
+      const computedValid = ComputedExpression.ValidateComputedExpression(column.path);
+      if (!computedValid.valid) {
+        result.isValid = false;
+        result.errors.push(`Invalid computed expression in column: ${computedValid.error}`);
+      }
+    } else {
+      // Validate regular field path exists in catalog
+      const pathValid = CatalogService.ValidateFieldPath(column.path);
+      if (!pathValid) {
+        result.isValid = false;
+        result.errors.push(`Column path not found in catalog: ${column.path}`);
+      }
     }
 
     // *************** Check alias uniqueness
@@ -396,11 +409,23 @@ function CountJoinsInPlan(plan) {
   // *************** Extract entities from columns
   if (plan.columns && Array.isArray(plan.columns)) {
     for (const column of plan.columns) {
-      if (column.path && column.path.includes('.')) {
-        const entityName = column.path.split('.')[0];
-        const defaultEntry = CatalogService.GetDefaultEntry();
-        if (entityName !== defaultEntry) {
-          joinedEntities.add(entityName);
+      if (column.path) {
+        // Check if computed expression
+        if (ComputedExpression.IsComputedExpression(column.path)) {
+          // Parse computed expression and extract joined entities
+          const parseResult = ComputedExpression.ParseComputedExpression(column.path);
+          if (parseResult.valid) {
+            const fields = parseResult.tokens.filter(t => t.type === 'field').map(t => t.value);
+            const joins = ComputedExpression.GetRequiredJoins(fields);
+            joins.forEach(entityName => joinedEntities.add(entityName));
+          }
+        } else if (column.path.includes('.')) {
+          // Regular joined field
+          const entityName = column.path.split('.')[0];
+          const defaultEntry = CatalogService.GetDefaultEntry();
+          if (entityName !== defaultEntry) {
+            joinedEntities.add(entityName);
+          }
         }
       }
     }

@@ -1,5 +1,6 @@
-// *************** IMPORT SERVICES ***************
+// *************** IMPORT MODULE ***************
 const CatalogService = require('../services/catalog.service');
+const ComputedExpression = require('./computed.expression');
 const JoinPlanner = require('../services/join.planner');
 
 /**
@@ -187,6 +188,7 @@ function BuildPostMatchStage(filters) {
 /**
  * BuildProjectStage constructs $project stage for column selection.
  * Maps column paths to projection fields with optional aliases.
+ * Supports computed expressions for concatenating multiple fields.
  * @param {Array} columns - Array of column objects with path and alias.
  * @param {Array} joins - Array of join metadata for field path resolution.
  * @returns {object|null} - $project stage or null if no columns.
@@ -200,10 +202,25 @@ function BuildProjectStage(columns, joins) {
 
   // *************** Build projection for each column
   for (const column of columns) {
-    const fieldPath = BuildFieldPath(column.path);
     const outputField = column.alias || column.path.replace('.', '_');
 
-    projection[outputField] = `$${fieldPath}`;
+    // *************** Check if column is computed expression
+    if (ComputedExpression.IsComputedExpression(column.path)) {
+      // *************** Parse and build MongoDB $concat expression
+      const parseResult = ComputedExpression.ParseComputedExpression(column.path);
+      
+      if (parseResult.valid) {
+        const mongoExpr = ComputedExpression.BuildMongoExpression(parseResult.tokens);
+        projection[outputField] = mongoExpr;
+      } else {
+        // *************** Fallback to literal if parsing fails
+        projection[outputField] = column.path;
+      }
+    } else {
+      // *************** Regular field reference
+      const fieldPath = BuildFieldPath(column.path);
+      projection[outputField] = `$${fieldPath}`;
+    }
   }
 
   return { $project: projection };
