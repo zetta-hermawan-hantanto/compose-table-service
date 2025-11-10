@@ -39,7 +39,7 @@ async function GetAiTableById(req, res) {
     if (isNaN(page) || page < 1) {
       throw new Error('Invalid page number');
     }
-    
+
     if (isNaN(limit) || limit < 1 || limit > 100) {
       throw new Error('Invalid limit number');
     }
@@ -149,6 +149,7 @@ async function GetAllAiTables(req, res) {
         status: table.status,
         session_chat_id: table.session_chat_id,
         created_at: table.created_at,
+        created_by: table.created_by,
       })),
       total_tables: tablesData.length,
     };
@@ -410,124 +411,251 @@ async function DeleteAIStudentTable(req, res) {
 }
 
 /**
- * Exports selected rows from a dynamic student table as a CSV download.
+ * Flattens a nested object (objects → dot keys; arrays → joined by ", ").
+ * Null and undefined become empty string. Dates become ISO strings.
+ * @param {Object} inputObj - The row.data object to flatten.
+ * @param {string} prefix - Internal: path prefix when recursing.
+ * @returns {Object} Flat object with dot keys.
+ */
+function FlattenRowDataForCsv(inputObj, prefix = '') {
+  const outputObject = {};
+
+  if (inputObj === null || inputObj === undefined) {
+    return outputObject;
+  }
+
+  if (typeof inputObj !== 'object' || inputObj instanceof Date) {
+    const keyName = prefix.length > 0 ? prefix : '';
+    if (keyName.length > 0) {
+      outputObject[keyName] = inputObj instanceof Date ? inputObj.toISOString() : String(inputObj);
+    }
+    return outputObject;
+  }
+
+  const objectKeys = Object.keys(inputObj);
+  for (let index = 0; index < objectKeys.length; index++) {
+    const keyName = objectKeys[index];
+    const value = inputObj[keyName];
+    const nextPrefix = prefix.length > 0 ? prefix + '.' + keyName : keyName;
+
+    if (value !== null && typeof value === 'object' && Array.isArray(value) === false && !(value instanceof Date)) {
+      const nestedFlat = FlattenRowDataForCsv(value, nextPrefix);
+      const nestedKeys = Object.keys(nestedFlat);
+      for (let j = 0; j < nestedKeys.length; j++) {
+        const nestedKey = nestedKeys[j];
+        outputObject[nestedKey] = nestedFlat[nestedKey];
+      }
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      const arrayJoined = value.map(function mapArrayToString(arrayItem) {
+        if (arrayItem === null || arrayItem === undefined) {
+          return '';
+        }
+        if (arrayItem instanceof Date) {
+          return arrayItem.toISOString();
+        }
+        return String(arrayItem);
+      }).join(', ');
+      outputObject[nextPrefix] = arrayJoined;
+      continue;
+    }
+
+    if (value instanceof Date) {
+      outputObject[nextPrefix] = value.toISOString();
+      continue;
+    }
+
+    if (value === null || value === undefined) {
+      outputObject[nextPrefix] = '';
+      continue;
+    }
+
+    outputObject[nextPrefix] = String(value);
+  }
+
+  return outputObject;
+}
+
+/**
+ * Escapes a single CSV cell value.
+ * @param {any} rawValue - Value to escape.
+ * @param {string} delimiter - CSV delimiter (e.g., ",", ";", "\t").
+ * @returns {string} Escaped value safe for CSV.
+ */
+function CsvEscapeSimple(rawValue, delimiter) {
+  let stringValue = '';
+
+  if (rawValue === null || rawValue === undefined) {
+    stringValue = '';
+  } else {
+    stringValue = String(rawValue);
+  }
+
+  if (stringValue.length > 0) {
+    const firstChar = stringValue.charAt(0);
+    if (firstChar === '=' || firstChar === '+' || firstChar === '-' || firstChar === '@') {
+      stringValue = "'" + stringValue;
+    }
+  }
+
+  const mustQuote = stringValue.indexOf(delimiter) >= 0
+    || stringValue.indexOf('\n') >= 0
+    || stringValue.indexOf('\r') >= 0
+    || stringValue.indexOf('"') >= 0;
+
+  if (mustQuote) {
+    const doubled = stringValue.replace(/"/g, '""');
+    const quoted = '"' + doubled + '"';
+    return quoted;
+  }
+
+  return stringValue;
+}
+
+/**
+ * Exports manual AI table rows to CSV (supports nested objects in row.data).
  *
- * @function ExportManualAITable
- * @param {import('express').Request} req
- * @param {import('express').Response} res
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
  * @returns {Promise<import('express').Response>}
  *
- * @rationale
- * - Manual selection:
- *    - is_select_all = true  -> export ALL active rows MINUS excluded_ids
- *    - is_select_all = false -> export ONLY included_ids
- * - Validates ownership (only table owner can export).
- * - Uses table's column order to shape CSV headers/values.
- * - CSV hygiene: quotes doubled, leading (= + - @) prefixed with ', null -> "".
- * - Streams CSV to client for immediate download (no S3/email).
- *
- * @errorHandling
- * - 400: invalid payload/ids, empty selection, invalid delimiter.
- * - 404: table not found or not owned by requester.
- * - 500: unexpected errors (logged to ErrorLogModel).
+ * @throws Will log error to ErrorLogModel and rethrow Apollo-style message
  */
 async function ExportManualAITable(req, res) {
   try {
-    const tableId = req.params.id;
-    const { is_select_all, included_ids, excluded_ids, delimiter, lang } = req.body;
-
-    // *************** Validate request parameters
+    // *************** Validation Section (fail fast)
+    const tableId = req && req.params ? req.params.id : null;
     if (!tableId) {
       throw new Error('Missing table id');
     }
 
-    if (typeof is_select_all !== 'boolean') {
+    const requestBody = req && req.body ? req.body : {};
+    const isSelectAll = requestBody.is_select_all;
+    const includedIds = requestBody.included_ids;
+    const excludedIds = requestBody.excluded_ids;
+    const delimiter = requestBody.delimiter;
+    const languageInput = requestBody.lang;
+
+    if (typeof isSelectAll !== 'boolean') {
       throw new Error('is_select_all must be a boolean');
     }
 
-    if (!Array.isArray(included_ids) && !Array.isArray(excluded_ids)) {
+    const includedIsArray = Array.isArray(includedIds);
+    const excludedIsArray = Array.isArray(excludedIds);
+    if (!includedIsArray && !excludedIsArray) {
       throw new Error('included_ids and excluded_ids must be arrays');
     }
 
-    if (typeof delimiter !== 'string' || !delimiter) {
+    if (typeof delimiter !== 'string' || delimiter.length === 0) {
       throw new Error('Invalid delimiter');
     }
 
-    if (!lang || typeof lang !== 'string' || ['fr', 'en'].includes(lang) === false) {
-      lang = 'en';
-    }
+    const exportLang = (typeof languageInput === 'string' && (languageInput === 'fr' || languageInput === 'en')) ? languageInput : 'en';
 
-    const allRows = [];
+    // *************** Query Section (collect rows according to selection)
+    const collectedRows = [];
 
-    if (is_select_all) {
-      if (Array.isArray(excluded_ids) && excluded_ids.length) {
-        allRows.push(
-          ...(await DynamicRowTableModel.find({ dynamic_table_id: tableId, status: 'active', _id: { $nin: excluded_ids } }).lean())
-        );
+    if (isSelectAll === true) {
+      if (excludedIsArray && excludedIds.length > 0) {
+        const queryResultExcluded = await DynamicRowTableModel.find({
+          dynamic_table_id: tableId,
+          status: 'active',
+          _id: { $nin: excludedIds }
+        }).lean();
+        for (let i = 0; i < queryResultExcluded.length; i++) {
+          collectedRows.push(queryResultExcluded[i]);
+        }
       } else {
-        allRows.push(...(await DynamicRowTableModel.find({ dynamic_table_id: tableId, status: 'active' }).lean()));
+        const queryResultAll = await DynamicRowTableModel.find({
+          dynamic_table_id: tableId,
+          status: 'active'
+        }).lean();
+        for (let i = 0; i < queryResultAll.length; i++) {
+          collectedRows.push(queryResultAll[i]);
+        }
       }
     } else {
-      if (Array.isArray(included_ids) && included_ids.length) {
-        allRows.push(
-          ...(await DynamicRowTableModel.find({ dynamic_table_id: tableId, status: 'active', _id: { $in: included_ids } }).lean())
-        );
+      if (includedIsArray && includedIds.length > 0) {
+        const queryResultIncluded = await DynamicRowTableModel.find({
+          dynamic_table_id: tableId,
+          status: 'active',
+          _id: { $in: includedIds }
+        }).lean();
+        for (let i = 0; i < queryResultIncluded.length; i++) {
+          collectedRows.push(queryResultIncluded[i]);
+        }
       }
     }
 
-    // *************** Handle case of no rows to export
-    if (allRows.length === 0) {
-      return res.status(200).json({ rows: [], total_rows: 0 });
+    // *************** Guard: no rows
+    if (collectedRows.length === 0) {
+      const emptyOutput = { rows: [], total_rows: 0 };
+      const emptyResponse = res.status(200).json(emptyOutput);
+      return emptyResponse;
     }
 
-    // *************** Query dynamic table by id
-    const tableDoc = await DynamicTableModel.findById(tableId).lean();
-    if (!tableDoc) {
-      throw new Error('Table not found');
+    // *************** Transformation Section (CSV build - SIMPLE MODE)
+    const firstRow = collectedRows[0];
+    const firstRowData = firstRow && firstRow.data ? firstRow.data : {};
+    const firstFlat = FlattenRowDataForCsv(firstRowData);
+    const columnLabels = Object.keys(firstFlat);
+
+    const headerLine = columnLabels.map(function mapHeaderToEscaped(headerKey) {
+      return CsvEscapeSimple(headerKey, delimiter);
+    }).join(delimiter);
+
+    let csvBodyString = '';
+    for (let r = 0; r < collectedRows.length; r++) {
+      const currentRow = collectedRows[r];
+      const currentData = currentRow && currentRow.data ? currentRow.data : {};
+      const flattened = FlattenRowDataForCsv(currentData);
+
+      const cells = [];
+      for (let c = 0; c < columnLabels.length; c++) {
+        const keyName = columnLabels[c];
+        const rawValue = Object.prototype.hasOwnProperty.call(flattened, keyName) ? flattened[keyName] : '';
+        const escaped = CsvEscapeSimple(rawValue, delimiter);
+        cells.push(escaped);
+      }
+
+      csvBodyString += cells.join(delimiter) + '\n';
     }
 
-    // *************** Enforce ownership check to prevent unauthorized access
-    const columnLabels = tableDoc.columns.map((col) => col.label);
+    const csvContent = headerLine + '\n' + csvBodyString;
 
-    // *************** Build CSV content
-    let finalStringRows = '';
-
-    // *************** Build CSV content from allRows
-    for (const row of allRows) {
-      finalStringRows += Object.values(row.data).join(delimiter) + '\n';
-    }
-
-    // *************** Combine header and data rows
-    const csvContent = columnLabels.join(delimiter) + '\n' + finalStringRows;
-
-    // *************** Determine name source for filename
+    // *************** Output Section (S3 upload + email)
     const nameSource = 'export-students';
-
-    // *************** Upload CSV to S3 and get presigned URL
     const uploadResult = await UploadCsvToS3({
       csvContent: csvContent,
-      nameSource: nameSource,
+      nameSource: nameSource
     });
 
-    // *************** Send export email to user
     await SendExportEmail({
       userId: req.userId,
-      csvResultString: `Exported ${allRows.length} rows with ${columnLabels.length} columns`,
-      fileUrl: uploadResult.url,
-      lang: lang,
+      csvResultString: 'Exported ' + String(collectedRows.length) + ' rows with ' + String(columnLabels.length) + ' columns',
+      fileUrl: uploadResult && uploadResult.url ? uploadResult.url : '',
+      lang: exportLang
     });
 
-    return res.status(200).json({ success: true, rows_exported: allRows.length });
+    const successOutput = { success: true, rows_exported: collectedRows.length };
+    const successResponse = res.status(200).json(successOutput);
+    return successResponse;
   } catch (error) {
-    // *************** Log error to database with request context
+    // *************** Error Handling Section (log + rethrow)
     await ErrorLogModel.create({
       path: 'controllers/compose.controller.js',
-      parameter_input: JSON.stringify({ params: req && req.params, body: req && req.body }),
+      parameter_input: JSON.stringify({
+        params: req ? req.params : null,
+        body: req ? req.body : null
+      }),
       function_name: 'ExportManualAITable',
-      error: String(error.stack),
+      error: String(error.stack)
     });
 
-    return res.status(500).json({ error: error.message });
+    const failureResponse = res.status(500).json({ error: error.message });
+    return failureResponse;
   }
 }
 
