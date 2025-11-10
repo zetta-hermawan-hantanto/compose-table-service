@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 const DynamicTableModel = require('../models/dynamic_table.model');
 const DynamicRowTableModel = require('../models/dynamic_row_table.model');
 const ErrorLogModel = require('../models/error_log.model');
+const UserModel = require('../models/user.model');
 
 // *************** IMPORT UTILITIES ***************
 const { UploadCsvToS3 } = require('../utils/s3.uploader');
