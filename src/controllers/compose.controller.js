@@ -68,6 +68,7 @@ async function GetAiTableById(req, res) {
       .limit(limit)
       .skip(skip);
 
+    // *************** Count total rows for pagination info
     const countTotalRow = await DynamicRowTableModel.countDocuments({
       dynamic_table_id: tableId,
       status: 'active',
@@ -141,12 +142,20 @@ async function GetAllAiTables(req, res) {
     // *************** Extract user ID from authenticated request
     const userId = req.userId;
 
+    // *************** Optionally, fetch user info for metadata (not used in response currently)
+    const user = await UserModel.findById(userId).select('first_name last_name').lean();
+
     // *************** Query dynamic tables created by user
     const tablesData = await DynamicTableModel.find({ created_by: userId, status: 'active' });
 
-    // *************** Construct output response
-    const outputResponse = {
-      tables: tablesData.map((table) => ({
+    // *************** Enrich tables with creator info and total rows
+    const tables = [];
+
+    // *************** Enrich each table with creator info and total rows
+    for (const table of tablesData) {
+      const user = await UserModel.findById(table.created_by).select('first_name last_name').lean();
+      const totalRows = await DynamicRowTableModel.countDocuments({ dynamic_table_id: table._id, status: 'active' });
+      tables.push({
         id: table._id,
         name: table.name,
         description: table.description,
@@ -155,21 +164,28 @@ async function GetAllAiTables(req, res) {
         status: table.status,
         session_chat_id: table.session_chat_id,
         created_at: table.created_at,
-        created_by: table.created_by,
-      })),
+        created_by: {
+          first_name: user ? user.first_name : null,
+          last_name: user ? user.last_name : null,
+        },
+        total_rows: totalRows,
+      });
+    }
+
+    // *************** Construct output response
+    const outputResponse = {
+      tables: tables,
       total_tables: tablesData.length,
     };
 
     return res.status(200).json(outputResponse);
   } catch (error) {
-    // *************** Log error to database with request context
     await ErrorLogModel.create({
       path: 'controllers/compose.controller.js',
       parameter_input: JSON.stringify({ params: req && req.params }),
       function_name: 'GetAllAiTables',
       error: String(error.stack),
     });
-
     return res.status(500).json({ error: error.message });
   }
 }
