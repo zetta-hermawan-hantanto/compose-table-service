@@ -243,16 +243,17 @@ async function ProcessChatTurn(params) {
     // *************** Inject context information about current session state
     const contextMessage = [];
     if (params.session.table_id) {
-      contextMessage.push(`[CONTEXT: Current active table_id is "${params.session.table_id}". Use this ID when calling tables_get_schema for modify operations.]`);
+      contextMessage.push(`[CONTEXT: Current active table_id is "${params.session.table_id}". A table already exists in this session. Use this ID for modify operations via tables_get_schema. DO NOT create new tables - user must modify existing table or start new session.]`);
+    } else {
+      contextMessage.push(`[CONTEXT: No active table in this session. User can create a new table.]`);
     }
     
-    if (contextMessage.length > 0) {
-      // Add context as system-level instruction before user messages
-      conversationMessages.unshift({
-        role: 'system',
-        content: contextMessage.join('\n'),
-      });
-    }
+    // Add context as system-level instruction before user messages
+    conversationMessages.unshift({
+      role: 'system',
+      content: contextMessage.join('\n'),
+    });
+    
 
     // *************** Call AI with envelope parsing
     const aiEnvelope = await CallAIWithEnvelope({
