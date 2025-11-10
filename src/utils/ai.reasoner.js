@@ -98,13 +98,34 @@ async function CallAIWithEnvelope(params) {
       type: 'function',
       function: {
         name: 'tables_get_schema',
-        description: 'Get current table schema for modify operations metadata only',
+        description: 'Get current table schema for modify operations metadata only (no sample data)',
         parameters: {
           type: 'object',
           properties: {
             table_id: {
               type: 'string',
               description: 'MongoDB ObjectId of the dynamic table',
+            },
+          },
+          required: ['table_id'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'tables_get_data',
+        description: 'Get current table structure AND sample rows (RECOMMENDED for modify operations - shows actual data)',
+        parameters: {
+          type: 'object',
+          properties: {
+            table_id: {
+              type: 'string',
+              description: 'MongoDB ObjectId of the dynamic table',
+            },
+            sample_size: {
+              type: 'number',
+              description: 'Number of sample rows to return (default 5, max 10)',
             },
           },
           required: ['table_id'],

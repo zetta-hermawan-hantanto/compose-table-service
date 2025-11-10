@@ -87,34 +87,27 @@ async function RebuildTableRows(table) {
   });
 
   // *************** Reconstruct plan from table metadata or stored plan
-  let plan;
-  
-  if (table.plan_metadata && table.plan_metadata.plan) {
-    // *************** Use stored plan if available
-    plan = table.plan_metadata.plan;
-  } else {
-    // *************** Reconstruct plan from table columns filters sort
-    plan = {
-      entry: 'students',
-      columns: table.columns.map((col) => ({
-        path: col.key,
-        alias: col.key,
-      })),
-      filters: (table.filters || []).map((filter) => ({
-        path: filter.key,
-        op: filter.operator,
-        value: filter.value,
-      })),
-      sort: (table.sort || []).map((s) => ({
-        path: s.key,
-        dir: s.direction,
-      })),
-      limit: 10000,
-    };
-  }
+  let plan = {
+    entry: 'students',
+    columns: table.columns.map((col) => ({
+      // *************** Use source.field for path (the actual field path), not key (the alias)
+      path: col.source && col.source.field ? col.source.field : col.key,
+      alias: col.key,
+    })),
+    filters: (table.filters || []).map((filter) => ({
+      path: filter.key,
+      op: filter.operator,
+      value: filter.value,
+    })),
+    sort: (table.sort || []).map((s) => ({
+      path: s.key,
+      dir: s.direction,
+    })),
+    limit: 10000,
+  };
 
   console.log('[DEBUG] Rebuild Table Rows Plan:', JSON.stringify(plan, null, 2));
-  
+
   // *************** Validate plan against catalog
   const validation = PlanValidator.ValidatePlan(plan);
 
@@ -249,17 +242,18 @@ async function ProcessChatTurn(params) {
     // *************** Inject context information about current session state
     const contextMessage = [];
     if (params.session.table_id) {
-      contextMessage.push(`[CONTEXT: Current active table_id is "${params.session.table_id}". A table already exists in this session. Use this ID for modify operations via tables_get_schema. DO NOT create new tables - user must modify existing table or start new session.]`);
+      contextMessage.push(
+        `[CONTEXT: Current active table_id is "${params.session.table_id}". A table already exists in this session. Use this ID for modify operations via tables_get_schema. DO NOT create new tables - user must modify existing table or start new session.]`
+      );
     } else {
       contextMessage.push(`[CONTEXT: No active table in this session. User can create a new table.]`);
     }
-    
+
     // Add context as system-level instruction before user messages
     conversationMessages.unshift({
       role: 'system',
       content: contextMessage.join('\n'),
     });
-    
 
     // *************** Call AI with envelope parsing
     const aiEnvelope = await CallAIWithEnvelope({
@@ -296,7 +290,7 @@ async function ProcessChatTurn(params) {
 
     if (aiEnvelope.status === 'ready' && aiEnvelope.intent === 'generate_table') {
       // *************** HANDLE CREATE PATH with v4.2 engine
-      
+
       // *************** Load catalog for validation
       const catalog = LoadCatalogMetadata();
 
@@ -304,11 +298,7 @@ async function ProcessChatTurn(params) {
       console.log('[DEBUG] AI Envelope Contract:', JSON.stringify(aiEnvelope.contract, null, 2));
 
       // *************** Validate contract using v1 validator for backward compatibility
-      const validatedContract = await ValidateStudentsContract(
-        aiEnvelope.contract,
-        catalog,
-        params.user_id
-      );
+      const validatedContract = await ValidateStudentsContract(aiEnvelope.contract, catalog, params.user_id);
 
       // *************** Log validated contract for debugging
       console.log('[DEBUG] Validated Contract:', JSON.stringify(validatedContract, null, 2));
@@ -406,7 +396,7 @@ async function ProcessChatTurn(params) {
 
     if (aiEnvelope.status === 'ready' && aiEnvelope.intent === 'modify_table') {
       // *************** HANDLE MODIFY PATH
-      
+
       // *************** Validate session has table_id
       if (!params.session.table_id) {
         throw new Error('Cannot modify without existing table_id in session');
@@ -423,11 +413,7 @@ async function ProcessChatTurn(params) {
       const catalog = LoadCatalogMetadata();
 
       // *************** Validate modification changes
-      const validatedChanges = await ValidateModifyContract(
-        aiEnvelope.changes,
-        existingTable,
-        catalog
-      );
+      const validatedChanges = await ValidateModifyContract(aiEnvelope.changes, existingTable, catalog);
 
       // *************** Apply changes to table
       if (validatedChanges.table_name) {
@@ -445,9 +431,7 @@ async function ProcessChatTurn(params) {
       }
 
       if (validatedChanges.remove_columns) {
-        existingTable.columns = existingTable.columns.filter(
-          (col) => !validatedChanges.remove_columns.includes(col.key)
-        );
+        existingTable.columns = existingTable.columns.filter((col) => !validatedChanges.remove_columns.includes(col.key));
       }
 
       if (validatedChanges.add_filters) {
@@ -463,9 +447,7 @@ async function ProcessChatTurn(params) {
       if (validatedChanges.remove_filters) {
         for (let i = 0; i < validatedChanges.remove_filters.length; i++) {
           const filterToRemove = validatedChanges.remove_filters[i];
-          existingTable.filters = existingTable.filters.filter(
-            (f) => f.key !== filterToRemove.key
-          );
+          existingTable.filters = existingTable.filters.filter((f) => f.key !== filterToRemove.key);
         }
       }
 
@@ -479,7 +461,7 @@ async function ProcessChatTurn(params) {
               key: updatedFilter.key,
               operator: updatedFilter.op,
               value: updatedFilter.value,
-            }
+            };
           }
         }
       }

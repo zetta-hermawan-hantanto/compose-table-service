@@ -113,6 +113,64 @@ function SearchCatalogFields(query) {
 }
 
 /**
+ * GetTableData retrieves table metadata AND sample rows for modify operations.
+ * Returns complete table structure with actual data samples to help AI understand current state.
+ * This is crucial for modify operations where AI needs to see what data is currently displayed.
+ * @param {string} tableId - MongoDB ObjectId of the dynamic table.
+ * @param {number} sampleSize - Number of sample rows to return (default 5, max 10).
+ * @returns {Promise<object>} - Object with table metadata and sample rows.
+ * @throws {Error} - If table_id is missing or table not found.
+ */
+async function GetTableData(tableId, sampleSize = 5) {
+  // *************** Validate table_id parameter
+  if (!tableId) {
+    throw new Error('Table ID is required');
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(tableId)) {
+    throw new Error('Invalid table ID format');
+  }
+
+  // *************** Load models dynamically to avoid circular dependency
+  const DynamicTableModel = require('../models/dynamic_table.model');
+  const DynamicRowTableModel = require('../models/dynamic_row_table.model');
+
+  // *************** Query table metadata by ID
+  const tableDoc = await DynamicTableModel.findById(tableId).lean();
+
+  if (!tableDoc) {
+    throw new Error('Table not found');
+  }
+
+  // *************** Limit sample size to max 10 rows
+  const effectiveSampleSize = Math.min(Math.max(1, sampleSize), 10);
+
+  // *************** Query sample rows from dynamic_row_table
+  const sampleRows = await DynamicRowTableModel
+    .find({ dynamic_table_id: tableId, status: 'active' })
+    .limit(effectiveSampleSize)
+    .lean();
+
+  // *************** Extract just the data field from rows
+  const sampleData = sampleRows.map(row => row.data);
+
+  // *************** Construct table data response
+  const tableData = {
+    table_id: String(tableDoc._id),
+    name: tableDoc.name,
+    description: tableDoc.description || '',
+    columns: tableDoc.columns || [],
+    filters: tableDoc.filters || [],
+    sort: tableDoc.sort || [],
+    total_rows: sampleRows.length, // Note: This is sample count, not total
+    sample_rows: sampleData,
+    sample_size: effectiveSampleSize,
+  };
+
+  return tableData;
+}
+
+/**
  * GetTableSchema retrieves table metadata for v2 modify operations.
  * Returns columns filters and sort configuration without exposing row data.
  * @param {string} tableId - MongoDB ObjectId of the dynamic table.
@@ -232,7 +290,7 @@ function CreateMcpServer() {
     },
     'tables_get_schema': {
       name: 'tables_get_schema',
-      description: 'Get current table schema for modify operations metadata only',
+      description: 'Get current table schema for modify operations metadata only (no sample data)',
       parameters: {
         table_id: {
           type: 'string',
@@ -242,6 +300,25 @@ function CreateMcpServer() {
       },
       handler: async function GetSchemaHandler(args) {
         return await GetTableSchema(args.table_id);
+      },
+    },
+    'tables_get_data': {
+      name: 'tables_get_data',
+      description: 'Get current table structure AND sample rows (use this for modify operations to see actual data)',
+      parameters: {
+        table_id: {
+          type: 'string',
+          required: true,
+          description: 'MongoDB ObjectId of the dynamic table',
+        },
+        sample_size: {
+          type: 'number',
+          required: false,
+          description: 'Number of sample rows to return (default 5, max 10)',
+        },
+      },
+      handler: async function GetDataHandler(args) {
+        return await GetTableData(args.table_id, args.sample_size);
       },
     },
   };
